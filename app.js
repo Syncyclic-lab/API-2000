@@ -216,7 +216,6 @@ function assemblePayload() {
     use_simplified_fire_table:   bool('opt_simplifiedTable'),
     credit_for_drainage:         bool('opt_drainage'),
     credit_for_fireproofing:     bool('opt_fireproofing'),
-    allowable_overpressure_pct:  num('allowableOverpressure') ?? 0,
   };
   const manualWA = num('manualWettedArea');
   if (manualWA != null) calculation_options.manual_wetted_area_override = manualWA;
@@ -254,7 +253,9 @@ function renderErrors(errors) {
 }
 
 function tableRow(label, value, highlight) {
-  return `<tr${highlight ? ' class="highlight"' : ''}><th>${label}</th><td>${value}</td></tr>`;
+  const safeLabel = escapeHtml(String(label));
+  const safeValue = escapeHtml(String(value));
+  return `<tr${highlight ? ' class="highlight"' : ''}><th>${safeLabel}</th><td>${safeValue}</td></tr>`;
 }
 
 function escapeHtml(str) {
@@ -368,7 +369,7 @@ function renderResults(result) {
     const im = result.intermediates;
     html += `
       <div class="result-section">
-        <div class="collapsible-toggle" onclick="this.classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+        <div class="collapsible-toggle" data-collapsible>
           <h3 style="margin:0;">Intermediates (SI Audit Trail)</h3>
           <span class="arrow">▶</span>
         </div>
@@ -377,7 +378,6 @@ function renderResults(result) {
             ${tableRow('Volume', fmtVal(im.volume_m3, 'm³'))}
             ${tableRow('MAWP', fmtVal(im.mawp_kpa, 'kPa'))}
             ${tableRow('MAWV', fmtVal(im.mawv_kpa, 'kPa'))}
-            ${tableRow('Allowable Overpressure', fmtVal(im.allowable_overpressure_pct, '%'))}
             ${tableRow('Fill Rate', fmtVal(im.fill_rate_m3hr, 'm³/hr'))}
             ${tableRow('Empty Rate', fmtVal(im.empty_rate_m3hr, 'm³/hr'))}
             ${tableRow('Vapor Pressure', fmtVal(im.vapor_pressure_kpa, 'kPa(a)'))}
@@ -406,6 +406,14 @@ function renderResults(result) {
     </div>`;
 
   resultsContainer.innerHTML = html;
+
+  // Bind collapsible toggles (replaces inline onclick for CSP compliance)
+  resultsContainer.querySelectorAll('[data-collapsible]').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+      toggle.classList.toggle('open');
+      toggle.nextElementSibling.classList.toggle('open');
+    });
+  });
 }
 
 // ── Render validation errors from server ─────────────────────────────────────
