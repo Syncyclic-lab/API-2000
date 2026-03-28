@@ -89,7 +89,7 @@
   // ─── 2. OPERATIONAL VENTING ──────────────────────────────────────────────────
 
   function calcOperationalInbreathing(emptyRateM3hr) {
-    return emptyRateM3hr * ACTUAL_TO_NORMAL * OPERATIONAL.INBREATHING_FACTOR;
+    return emptyRateM3hr * OPERATIONAL.INBREATHING_FACTOR;
   }
 
   function calcOperationalOutbreathing(fillRateM3hr, isVolatile) {
@@ -139,7 +139,7 @@
           wetted_angle_rad = 2 * (Math.PI - half_angle);
         }
         const shell_area = wetted_angle_rad * R * H;
-        const head_area  = head_area = 0.5 * R * R * (wetted_angle_rad - Math.sin(wetted_angle_rad));
+        const head_area = 0.5 * R * R * (wetted_angle_rad - Math.sin(wetted_angle_rad));
         raw_area_m2 = shell_area + head_area;
         method = 'Horizontal cylinder — arc-weighted shell + heads';
         break;
