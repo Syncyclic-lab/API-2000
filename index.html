@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>API 2000 Venting Calculator</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -363,7 +364,7 @@
     <svg width="32" height="32" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="6" fill="#1a73e8"/><path d="M8 22V10h4v12H8zm6-8v8h4v-8h-4zm6-4v12h4V10h-4z" fill="#fff"/></svg>
     <div>
       <h1>API 2000 Venting Calculator</h1>
-      <div class="subtitle">Atmospheric &amp; Low-Pressure Storage Tank Sizing &bull; 7th Edition, March 2014 &bull; Thermal venting per Annex A (Alternative Method)</div>
+      <div class="subtitle">Atmospheric &amp; Low-Pressure Storage Tank Sizing &bull; 7th Edition, March 2014</div>
     </div>
   </header>
 
@@ -436,11 +437,6 @@
               <label for="tankMAWV">MAWV <span class="unit press-unit">kPa(g)</span></label>
               <input type="number" id="tankMAWV" step="any" min="0" required>
               <div class="hint">Max Allowable Working Vacuum</div>
-            </div>
-            <div class="field">
-              <label for="allowableOverpressure">Allowable Overpressure <span class="unit">%</span></label>
-              <input type="number" id="allowableOverpressure" step="any" min="0" max="100" value="0" placeholder="0">
-              <div class="hint">Fire-case relieving pressure = MAWP × (1 + %) + atm. Common values: 10–21%</div>
             </div>
             <div class="field">
               <label for="tankElevation">Elevation Above Grade <span class="unit dim-unit">m</span></label>
