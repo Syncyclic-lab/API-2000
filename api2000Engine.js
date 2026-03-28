@@ -247,6 +247,99 @@
     };
   }
 
+  // ─── 8.5 ACTUAL VENTING DEVICES (PHASE 3) ───────────────────────────────────
+
+  /**
+   * Calculates the actual flow for a single device given a specific tank pressure.
+   * Assumes linear proportional lift between Set Pressure and Rated Pressure.
+   */
+  function calcDeviceFlow(setPressure, ratedFlow, overpressurePct, tankPressure) {
+    if (setPressure == null || ratedFlow == null || tankPressure == null) return 0;
+    
+    // If the tank hasn't reached the set pressure, the valve is closed
+    if (tankPressure <= setPressure) return 0;
+
+    // Calculate the pressure at which the valve is fully open (rated capacity)
+    const ratedPressure = setPressure * (1 + (overpressurePct / 100));
+
+    // Guard against divide-by-zero if user enters 0% overpressure
+    if (ratedPressure === setPressure) {
+      return tankPressure >= setPressure ? ratedFlow : 0;
+    }
+
+    // If tank pressure meets or exceeds rated pressure, it flows at 100% rated capacity
+    if (tankPressure >= ratedPressure) return ratedFlow;
+
+    // If tank pressure is between set and rated, interpolate linearly (standard approximation)
+    const partialLiftRatio = (tankPressure - setPressure) / (ratedPressure - setPressure);
+    return ratedFlow * partialLiftRatio;
+  }
+
+  /**
+   * Aggregates the flow of all installed devices at the tank's relieving conditions.
+   * Note: This function expects all inputs to already be converted to SI units (kPa, Nm³/hr).
+   */
+  function calcActualVenting(devices, relieving_pressure_kpa, relieving_vacuum_kpa) {
+    let actual_normal_out = 0;
+    let actual_emergency_out = 0;
+    let actual_in = 0;
+
+    const evaluated_devices = devices.map(dev => {
+      let flow_out = 0;
+      let flow_in = 0;
+
+      // 1. Evaluate Outbreathing (Pressure)
+      if (dev.direction === 'BOTH' || dev.direction === 'OUTBREATHING') {
+        // Free vents don't have a "set pressure" — they are always open.
+        // We assume their rated flow was provided at the tank's relieving pressure.
+        if (dev.type === 'FREE_VENT') {
+          flow_out = dev.rated_flow_outbreathing || 0;
+        } else {
+          flow_out = calcDeviceFlow(
+            dev.set_pressure, 
+            dev.rated_flow_outbreathing, 
+            dev.rated_overpressure_pct, 
+            relieving_pressure_kpa
+          );
+        }
+
+        // Categorize the outbreathing flow
+        if (dev.type === 'PVRV' || dev.type === 'FREE_VENT') {
+          actual_normal_out += flow_out;
+          actual_emergency_out += flow_out; // Normal vents also relieve during emergencies
+        } else if (dev.type === 'EPRV') {
+          actual_emergency_out += flow_out; // Emergency vents ONLY count for emergencies
+        }
+      }
+
+      // 2. Evaluate Inbreathing (Vacuum)
+      if (dev.direction === 'BOTH' || dev.direction === 'INBREATHING') {
+        if (dev.type === 'FREE_VENT') {
+          flow_in = dev.rated_flow_inbreathing || 0;
+        } else {
+          flow_in = calcDeviceFlow(
+            dev.set_vacuum, 
+            dev.rated_flow_inbreathing, 
+            dev.rated_overpressure_pct, 
+            relieving_vacuum_kpa
+          );
+        }
+        
+        // All inbreathing devices contribute to total vacuum relief
+        actual_in += flow_in;
+      }
+
+      return { ...dev, calculated_flow_out: flow_out, calculated_flow_in: flow_in };
+    });
+
+    return {
+      actual_normal_out,
+      actual_emergency_out,
+      actual_in,
+      evaluated_devices
+    };
+  }
+
   // ─── 9. WARNING ACCUMULATOR ──────────────────────────────────────────────────
 
   function generateWarnings(inputs, intermediates) {
@@ -321,6 +414,89 @@
         `applicable pressure vessel code (e.g. ASME Section VIII).`
       );
     }
+
+    // ── Device-related warnings ─────────────────────────────────────────────
+    const devices = inputs.devices;
+    if (devices && devices.length > 0) {
+      const mawp_kpa = inputs.tank.mawp_kpa;
+      const mawv_kpa = inputs.tank.mawv_kpa;
+
+      const hasNormalOut = devices.some(d =>
+        (d.type === 'PVRV' || d.type === 'FREE_VENT') &&
+        (d.direction === 'BOTH' || d.direction === 'OUTBREATHING')
+      );
+      const hasEmergencyOnly = devices.some(d => d.type === 'EPRV');
+      const hasAnyInbreathing = devices.some(d =>
+        d.direction === 'BOTH' || d.direction === 'INBREATHING'
+      );
+      const hasAnyOutbreathing = devices.some(d =>
+        d.direction === 'BOTH' || d.direction === 'OUTBREATHING'
+      );
+
+      if (hasEmergencyOnly && !hasNormalOut) {
+        warnings.push(
+          'WARNING: An Emergency Relief Valve (EPRV) is installed but no Normal ' +
+          'PVRV or Free Vent provides outbreathing for normal operating conditions. ' +
+          'EPRVs only relieve during emergencies and do not satisfy normal venting ' +
+          'requirements per API 2000 §4.3.2.'
+        );
+      }
+
+      if (!hasAnyOutbreathing) {
+        warnings.push(
+          'WARNING: No installed devices provide outbreathing (pressure relief). ' +
+          'The tank has no capacity for thermal or operational outbreathing loads.'
+        );
+      }
+
+      if (!hasAnyInbreathing) {
+        warnings.push(
+          'WARNING: No installed devices provide inbreathing (vacuum relief). ' +
+          'The tank has no capacity for thermal or operational inbreathing loads.'
+        );
+      }
+
+      devices.forEach((d, i) => {
+        const label = `Device #${i + 1} (${d.type})`;
+
+        // Set pressure exceeds MAWP
+        if (d.set_pressure != null && mawp_kpa != null && d.set_pressure > mawp_kpa) {
+          warnings.push(
+            `WARNING: ${label} set pressure (${d.set_pressure.toFixed(2)} kPa) ` +
+            `exceeds the tank MAWP (${mawp_kpa.toFixed(2)} kPa). ` +
+            `The device may not open before the tank's design pressure is exceeded.`
+          );
+        }
+
+        // Set vacuum exceeds MAWV
+        if (d.set_vacuum != null && mawv_kpa != null && d.set_vacuum > mawv_kpa) {
+          warnings.push(
+            `WARNING: ${label} set vacuum (${d.set_vacuum.toFixed(2)} kPa) ` +
+            `exceeds the tank MAWV (${mawv_kpa.toFixed(2)} kPa). ` +
+            `The device may not open before the tank's design vacuum is exceeded.`
+          );
+        }
+
+        // Outbreathing direction but missing rated flow
+        if ((d.direction === 'BOTH' || d.direction === 'OUTBREATHING') &&
+            (d.rated_flow_outbreathing == null || d.rated_flow_outbreathing <= 0)) {
+          warnings.push(
+            `NOTICE: ${label} is configured for outbreathing but has no rated ` +
+            `outbreathing flow. Its pressure relief contribution will be zero.`
+          );
+        }
+
+        // Inbreathing direction but missing rated flow
+        if ((d.direction === 'BOTH' || d.direction === 'INBREATHING') &&
+            (d.rated_flow_inbreathing == null || d.rated_flow_inbreathing <= 0)) {
+          warnings.push(
+            `NOTICE: ${label} is configured for inbreathing but has no rated ` +
+            `inbreathing flow. Its vacuum relief contribution will be zero.`
+          );
+        }
+      });
+    }
+
     return warnings;
   }
 
@@ -339,6 +515,8 @@
     calcEmergencyOutbreathing,
     calcTotalNormalVenting,
     calcGoverning,
+    calcDeviceFlow,
+    calcActualVenting,
     generateWarnings,
   };
 })();
