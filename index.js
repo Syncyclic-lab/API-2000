@@ -61,7 +61,10 @@
         ? uc.toC(fluid.relieving_vapor_temp, us)
         : temp_contents_C;
 
-      const relieving_P_kpa = uc.gaugeToAbsKpa(mawp_kpa);
+      // Relieving pressure absolute: MAWP × (1 + overpressure%) + atm
+      const overpressure_pct = opts.allowable_overpressure_pct ?? 0;
+      const mawp_relieving_kpa = mawp_kpa * (1 + overpressure_pct / 100);
+      const relieving_P_kpa = uc.gaugeToAbsKpa(mawp_relieving_kpa);
 
       let env_si = { ...env };
       if (env.insulation && us === 'US') {
@@ -244,6 +247,7 @@
         volume_m3:                round(volume_m3, 3),
         mawp_kpa:                 round(mawp_kpa, 3),
         mawv_kpa:                 round(mawv_kpa, 3),
+        allowable_overpressure_pct: overpressure_pct,
         fill_rate_m3hr:           round(fill_m3hr, 4),
         empty_rate_m3hr:          round(empty_m3hr, 4),
         vapor_pressure_kpa:       round(vp_kpa, 4),
