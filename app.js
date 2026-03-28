@@ -37,6 +37,7 @@ const UNIT_CLASS_MAP = {
   'insul-k-unit':    'insulK',
   'insul-h-unit':    'insulH',
   'area-unit':       'area',
+  'flow-unit':       'flow',
 };
 
 // ── DOM References ───────────────────────────────────────────────────────────
@@ -50,6 +51,192 @@ const insulationType    = $('insulationType');
 const insulationFields  = $('insulationFields');
 const coverageField     = $('coverageFractionField');
 const unitSystemSelect  = $('unitSystem');
+
+// ── Tab Switching ──────────────────────────────────────────────────────────
+
+document.querySelectorAll('.tab-button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    // Deactivate all tab buttons
+    document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+    // Deactivate all tab content panes
+    document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+    // Activate clicked button and its target pane
+    btn.classList.add('active');
+    const target = document.getElementById(btn.dataset.tab);
+    if (target) target.classList.add('active');
+  });
+});
+
+// ── Actual Venting Device Management ─────────────────────────────────────────
+
+const btnAddDevice = $('btnAddDevice');
+const deviceRoster = $('deviceRoster');
+let deviceIdCounter = 0;
+
+/**
+ * renderDeviceRow()  –  Phase 2 (Step 2.3)
+ * Injects a new device card into the DOM with all required fields.
+ * Fields conditionally show/hide based on the selected relief direction.
+ */
+function renderDeviceRow() {
+  deviceIdCounter++;
+  const id = deviceIdCounter;
+
+  const card = document.createElement('div');
+  card.className = 'device-card';
+  card.id = `device-card-${id}`;
+  card.dataset.deviceId = id;
+
+  card.innerHTML = `
+    <div class="device-card-header">
+      <span class="device-label">Device #${id}</span>
+      <button type="button" class="btn-remove-device" data-remove-device="${id}">Remove</button>
+    </div>
+    <div class="field-grid">
+      <div class="field">
+        <label>Device Type</label>
+        <select class="dev-type" data-field="type">
+          <option value="PVRV">Normal PVRV / Breather Valve</option>
+          <option value="EPRV">Emergency Relief Valve (EPRV)</option>
+          <option value="FREE_VENT">Free Vent / Gooseneck</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Relief Direction</label>
+        <select class="dev-direction" data-field="direction">
+          <option value="BOTH">Outbreathing &amp; Inbreathing</option>
+          <option value="OUTBREATHING">Outbreathing (Pressure) Only</option>
+          <option value="INBREATHING">Inbreathing (Vacuum) Only</option>
+        </select>
+      </div>
+      <div class="field dev-field-sp">
+        <label>Set Pressure <span class="unit press-unit"></span></label>
+        <input type="number" step="any" min="0" class="dev-sp" data-field="set_pressure" placeholder="e.g. 0.5">
+        <div class="hint">Pressure at which valve opens</div>
+      </div>
+      <div class="field dev-field-sv">
+        <label>Set Vacuum <span class="unit press-unit"></span></label>
+        <input type="number" step="any" min="0" class="dev-sv" data-field="set_vacuum" placeholder="e.g. 0.2">
+        <div class="hint">Vacuum at which valve opens</div>
+      </div>
+      <div class="field dev-field-flow-out">
+        <label>Rated Outbreathing Flow <span class="unit flow-unit"></span></label>
+        <input type="number" step="any" min="0" class="dev-flow-out" data-field="flow_out">
+      </div>
+      <div class="field dev-field-flow-in">
+        <label>Rated Inbreathing Flow <span class="unit flow-unit"></span></label>
+        <input type="number" step="any" min="0" class="dev-flow-in" data-field="flow_in">
+      </div>
+      <div class="field dev-field-overpressure">
+        <label>Rated at Overpressure <span class="unit">%</span></label>
+        <input type="number" step="any" min="0" class="dev-overpressure" data-field="rated_overpressure" value="10" placeholder="e.g. 10 or 100">
+        <div class="hint">Flow capacity rated at this % overpressure</div>
+      </div>
+    </div>
+  `;
+
+  deviceRoster.appendChild(card);
+  applyDirectionVisibility(card);
+  updateUnitLabels(); // Ensure unit labels are set on the new card
+  renumberDeviceCards();
+}
+
+/**
+ * applyDirectionVisibility()
+ * Shows or hides set-pressure, set-vacuum, and flow fields based on the
+ * currently selected relief direction for a given device card.
+ */
+function applyDirectionVisibility(card) {
+  const dir = card.querySelector('.dev-direction').value;
+
+  const showPressure = dir === 'BOTH' || dir === 'OUTBREATHING';
+  const showVacuum   = dir === 'BOTH' || dir === 'INBREATHING';
+
+  card.querySelector('.dev-field-sp').style.display       = showPressure ? '' : 'none';
+  card.querySelector('.dev-field-flow-out').style.display  = showPressure ? '' : 'none';
+  card.querySelector('.dev-field-sv').style.display        = showVacuum   ? '' : 'none';
+  card.querySelector('.dev-field-flow-in').style.display   = showVacuum   ? '' : 'none';
+
+  // Overpressure % only meaningful for pressure relief
+  card.querySelector('.dev-field-overpressure').style.display = showPressure ? '' : 'none';
+}
+
+/**
+ * renumberDeviceCards()
+ * Re-labels the visible device cards sequentially (Device #1, #2, …)
+ * after any addition or removal so numbering stays tidy.
+ */
+function renumberDeviceCards() {
+  const cards = deviceRoster.querySelectorAll('.device-card');
+  cards.forEach((card, idx) => {
+    card.querySelector('.device-label').textContent = `Device #${idx + 1}`;
+  });
+}
+
+/**
+ * collectDeviceData()  –  Phase 2 (Step 2.3)
+ * Scrapes every device card in the DOM and returns a clean array of
+ * device objects suitable for the calculation payload.
+ */
+function collectDeviceData() {
+  const devices = [];
+  deviceRoster.querySelectorAll('.device-card').forEach(card => {
+    const dir = card.querySelector('.dev-direction').value;
+
+    const device = {
+      type:      card.querySelector('.dev-type').value,
+      direction: dir,
+    };
+
+    // Only collect fields that are relevant to the selected direction
+    if (dir === 'BOTH' || dir === 'OUTBREATHING') {
+      const sp = parseFloat(card.querySelector('.dev-sp').value);
+      if (!isNaN(sp)) device.set_pressure = sp;
+
+      const flowOut = parseFloat(card.querySelector('.dev-flow-out').value);
+      if (!isNaN(flowOut)) device.rated_flow_outbreathing = flowOut;
+
+      const op = parseFloat(card.querySelector('.dev-overpressure').value);
+      if (!isNaN(op)) device.rated_overpressure_pct = op;
+    }
+
+    if (dir === 'BOTH' || dir === 'INBREATHING') {
+      const sv = parseFloat(card.querySelector('.dev-sv').value);
+      if (!isNaN(sv)) device.set_vacuum = sv;
+
+      const flowIn = parseFloat(card.querySelector('.dev-flow-in').value);
+      if (!isNaN(flowIn)) device.rated_flow_inbreathing = flowIn;
+    }
+
+    devices.push(device);
+  });
+  return devices;
+}
+
+// Event delegation for device roster: remove cards & direction changes
+deviceRoster.addEventListener('click', (e) => {
+  const removeBtn = e.target.closest('[data-remove-device]');
+  if (removeBtn) {
+    const id = removeBtn.dataset.removeDevice;
+    const card = $(`device-card-${id}`);
+    if (card) {
+      card.remove();
+      renumberDeviceCards();
+    }
+  }
+});
+
+deviceRoster.addEventListener('change', (e) => {
+  if (e.target.classList.contains('dev-direction')) {
+    const card = e.target.closest('.device-card');
+    if (card) applyDirectionVisibility(card);
+  }
+});
+
+btnAddDevice.addEventListener('click', renderDeviceRow);
+
+// Add one device by default to prompt the user
+renderDeviceRow();
 
 // ── Unit label updater ───────────────────────────────────────────────────────
 
@@ -220,7 +407,10 @@ function assemblePayload() {
   const manualWA = num('manualWettedArea');
   if (manualWA != null) calculation_options.manual_wetted_area_override = manualWA;
 
-  return { meta, tank, fluid, environment, abnormal_scenarios, calculation_options };
+  // Collect installed venting devices from the Actual Venting tab
+  const devices = collectDeviceData();
+
+  return { meta, tank, fluid, environment, abnormal_scenarios, calculation_options, devices };
 }
 
 // ── Render helpers ───────────────────────────────────────────────────────────
@@ -283,6 +473,70 @@ function renderResults(result) {
   // Warnings & errors
   html += renderWarnings(result.warnings);
   html += renderErrors(result.errors);
+
+  // ── Phase 5: Compliance Summary Dashboard ───────────────────────────────
+  if (o.actual_venting && o.governing) {
+    const av = o.actual_venting;
+    const ad = av.adequacy;
+    const allPass = ad.normal_out && ad.emergency_out && ad.inbreathing;
+    const headerCls = allPass ? 'all-pass' : 'has-fail';
+    const headerIcon = allPass
+      ? '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    const headerLabel = allPass
+      ? 'All Venting Requirements Met'
+      : 'Venting Deficiency Detected — Review Required';
+
+    const passIcon = '<svg class="status-pass" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6 9.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const failIcon = '<svg class="status-fail" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 6.5l5 5M11.5 6.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+    // Build comparison rows
+    const rows = [];
+
+    // Normal outbreathing: required = normal total, actual = actual normal
+    if (o.normal_venting && o.normal_venting.totals) {
+      rows.push({
+        label:    'Normal Outbreathing',
+        required: fmtVal(o.normal_venting.totals.total_outbreathing, fu),
+        actual:   fmtVal(av.actual_normal_outbreathing, fu),
+        pass:     ad.normal_out,
+      });
+    }
+
+    // Emergency outbreathing: required = governing outbreathing, actual = actual emergency
+    rows.push({
+      label:    'Emergency Outbreathing',
+      required: fmtVal(o.governing.governing_outbreathing, fu),
+      actual:   fmtVal(av.actual_emergency_outbreathing, fu),
+      pass:     ad.emergency_out,
+    });
+
+    // Inbreathing: required = governing inbreathing, actual = actual inbreathing
+    rows.push({
+      label:    'Inbreathing (Vacuum)',
+      required: fmtVal(o.governing.governing_inbreathing, fu),
+      actual:   fmtVal(av.actual_inbreathing, fu),
+      pass:     ad.inbreathing,
+    });
+
+    html += `
+      <div class="compliance-summary">
+        <div class="compliance-header ${headerCls}">${headerIcon} ${headerLabel}</div>
+        <div class="compliance-row-header">
+          <span>Requirement</span><span>Required</span><span>Actual</span><span></span>
+        </div>
+        <div class="compliance-rows">
+          ${rows.map(r => `
+            <div class="compliance-row">
+              <span class="cr-label">${escapeHtml(r.label)}</span>
+              <span class="cr-value required">${escapeHtml(r.required)}</span>
+              <span class="cr-value ${r.pass ? 'actual-pass' : 'actual-fail'}">${escapeHtml(r.actual)}</span>
+              <span class="cr-status">${r.pass ? passIcon : failIcon}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+  }
 
   // Governing requirements (featured prominently)
   if (o.governing) {
@@ -362,6 +616,50 @@ function renderResults(result) {
           <table class="result-table">${evRows}</table>
         </div>`;
     }
+  }
+
+  // ── Phase 5.3: Installed Device Breakdown ──────────────────────────────
+  if (o.actual_venting && o.actual_venting.devices && o.actual_venting.devices.length > 0) {
+    const devs = o.actual_venting.devices;
+    const typeLabels = { PVRV: 'PVRV', EPRV: 'EPRV', FREE_VENT: 'Free Vent' };
+    const typeCls    = { PVRV: 'pvrv', EPRV: 'eprv', FREE_VENT: 'free-vent' };
+
+    html += `
+      <div class="device-breakdown">
+        <h3>Installed Device Contributions at Relieving Pressure</h3>
+        <table class="device-breakdown-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Type</th>
+              <th>Direction</th>
+              <th>Outbreathing</th>
+              <th>Inbreathing</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${devs.map((d, i) => {
+              const tLabel = typeLabels[d.type] || d.type;
+              const tCls   = typeCls[d.type]   || '';
+              const dirLabel = d.direction === 'BOTH' ? 'Both' : d.direction === 'OUTBREATHING' ? 'Pressure' : 'Vacuum';
+              return `<tr>
+                <td>${i + 1}</td>
+                <td><span class="type-badge ${tCls}">${escapeHtml(tLabel)}</span></td>
+                <td>${escapeHtml(dirLabel)}</td>
+                <td class="mono-val">${d.flow_out != null && d.flow_out > 0 ? fmtVal(d.flow_out, fu) : '—'}</td>
+                <td class="mono-val">${d.flow_in != null && d.flow_in > 0 ? fmtVal(d.flow_in, fu) : '—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="font-weight:700; border-top: 2px solid var(--gray-200);">
+              <td colspan="3" style="text-align:right; color:var(--gray-600);">Total Installed Capacity</td>
+              <td class="mono-val">${fmtVal(o.actual_venting.actual_emergency_outbreathing, fu)}</td>
+              <td class="mono-val">${fmtVal(o.actual_venting.actual_inbreathing, fu)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
   }
 
   // Intermediates (collapsible)
