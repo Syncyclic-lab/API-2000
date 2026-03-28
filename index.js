@@ -174,13 +174,49 @@
       );
 
       // ══════════════════════════════════════════════════════════════════════
+      // STEP 6.5 Actual Venting Devices (Phase 4)
+      // ══════════════════════════════════════════════════════════════════════
+      
+      let actual_venting_result = null;
+      
+      if (inputs.devices && inputs.devices.length > 0) {
+        // 1. Convert user inputs to SI units (kPa and Nm³/hr)
+        // Note: 1 Nm³/hr ≈ 37.32 SCFH
+        const flowToSI = (val) => {
+          if (val == null) return null;
+          return us === 'US' ? val / 37.32 : val;
+        };
+
+        const actual_devices_si = inputs.devices.map(d => ({
+          ...d,
+          set_pressure: d.set_pressure != null ? uc.toKpa(d.set_pressure, us) : null,
+          set_vacuum:   d.set_vacuum   != null ? uc.toKpa(d.set_vacuum, us)   : null,
+          rated_flow_outbreathing: flowToSI(d.rated_flow_outbreathing),
+          rated_flow_inbreathing:  flowToSI(d.rated_flow_inbreathing),
+        }));
+
+        // 2. Determine relieving vacuum (typically evaluated at MAWV)
+        const relieving_vacuum_kpa = mawv_kpa;
+
+        // 3. Run the engine calculation
+        actual_venting_result = engine.calcActualVenting(
+          actual_devices_si, 
+          relieving_P_kpa, 
+          relieving_vacuum_kpa
+        );
+      }
+
+      // ══════════════════════════════════════════════════════════════════════
       // STEP 7  Warnings
       // ══════════════════════════════════════════════════════════════════════
 
       const enriched_inputs = {
         ...inputs,
-        tank:  { ...tank,  volume_m3, mawp_kpa },
+        tank:  { ...tank,  volume_m3, mawp_kpa, mawv_kpa },
         fluid: { ...fluid, latent_heat_J_kg: latent_J_kg, vapor_pressure_kpa: vp_kpa },
+        devices: actual_venting_result
+          ? actual_venting_result.evaluated_devices
+          : (inputs.devices || []),
       };
       const warnings = engine.generateWarnings(enriched_inputs, { wetted: wetted_result });
 
@@ -237,6 +273,24 @@
           governing_inbreathing:  round(toFlow(governing.governing_in), 1),
           emergency_governs:      governing.emergency_governs,
         },
+
+        actual_venting: actual_venting_result ? {
+          actual_normal_outbreathing: round(toFlow(actual_venting_result.actual_normal_out), 1),
+          actual_emergency_outbreathing: round(toFlow(actual_venting_result.actual_emergency_out), 1),
+          actual_inbreathing: round(toFlow(actual_venting_result.actual_in), 1),
+          adequacy: {
+            normal_out: actual_venting_result.actual_normal_out >= totals.total_out,
+            emergency_out: actual_venting_result.actual_emergency_out >= governing.governing_out,
+            inbreathing: actual_venting_result.actual_in >= governing.governing_in
+          },
+          devices: actual_venting_result.evaluated_devices.map(d => ({
+            id: d.id,
+            type: d.type,
+            direction: d.direction,
+            flow_out: round(toFlow(d.calculated_flow_out), 1),
+            flow_in: round(toFlow(d.calculated_flow_in), 1)
+          }))
+        } : null
       };
 
       // ══════════════════════════════════════════════════════════════════════
@@ -264,6 +318,9 @@
         emergency_out_Nm3hr:      emergency_result ? round(emergency_result.emergency_out_Nm3hr, 2) : null,
         governing_out_Nm3hr:      round(governing.governing_out, 2),
         governing_in_Nm3hr:       round(governing.governing_in, 2),
+        actual_normal_out_Nm3hr: actual_venting_result ? round(actual_venting_result.actual_normal_out, 2) : null,
+        actual_emergency_out_Nm3hr: actual_venting_result ? round(actual_venting_result.actual_emergency_out, 2) : null,
+        actual_in_Nm3hr: actual_venting_result ? round(actual_venting_result.actual_in, 2) : null,
       };
 
       return {
