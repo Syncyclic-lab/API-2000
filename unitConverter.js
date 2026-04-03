@@ -63,6 +63,12 @@
   const heatToOutput = (watts, unitSystem) =>
     unitSystem === 'US' ? wToBtuhr(watts) : watts;
 
+  // ─── PIPE DIAMETER (small bore: inches ↔ mm → metres) ────────────────────
+  const inToM  = l => l * 0.0254;
+  const mmToM  = l => l * 0.001;
+  const pipeDiamToM = (value, unitSystem) =>
+    unitSystem === 'US' ? inToM(value) : mmToM(value);
+
   // ─── DIAMETER / DIMENSIONS ──────────────────────────────────────────────────
   const convertDimsToSI = (dims, unitSystem) => {
     if (!dims) return {};
@@ -70,20 +76,11 @@
     return {
       diameter:          convert(dims.diameter),
       height_or_length:  convert(dims.height_or_length),
-      cone_roof_angle:   dims.cone_roof_angle_deg,
+      cone_roof_angle:   dims.cone_roof_angle ?? dims.cone_roof_angle_deg,
     };
   };
 
   // ─── EXPORT ─────────────────────────────────────────────────────────────────
   window.API2000.uc = {
     bblToM3, m3ToBbl, toM3,
-    scfhToNm3hr, nm3hrToScfh,
-    liquidFlowToM3hr, ventingFlowToOutput,
-    ft2ToM2, m2ToFt2, toM2, areaToOutput,
-    ftToM, mToFt, toMetres,
-    psiToKpa, kpaToPsi, toKpa, gaugeToAbsKpa,
-    fToC, cToF, fToR, cToK, toC,
-    btuhrToW, wToBtuhr, btulbToJkg, jkgToBtulb, toJkg, heatToOutput,
-    convertDimsToSI,
-  };
-})();
+    scfhToNm3hr, nm3hrToSc
