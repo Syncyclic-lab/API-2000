@@ -568,6 +568,28 @@
     .type-badge.pvrv { background: var(--blue-light); color: var(--blue); }
     .type-badge.eprv { background: var(--orange-bg); color: #9a5a05; }
     .type-badge.free-vent { background: var(--green-bg); color: var(--green); }
+
+    /* ── Radio Groups (capacity source) ─────── */
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .radio-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: var(--gray-700);
+    }
+    .radio-item input[type="radio"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--blue);
+      cursor: pointer;
+      margin: 0;
+    }
   </style>
 </head>
 <body>
@@ -717,6 +739,16 @@
               <label for="specificGravity">Specific Gravity</label>
               <input type="number" id="specificGravity" step="any" min="0" value="1.0">
             </div>
+            <div class="field" id="fluidKField" style="display:none;">
+              <label for="fluidK">Ratio of Specific Heats (<i>k</i>)</label>
+              <input type="number" id="fluidK" step="0.01" min="1" max="2" placeholder="e.g. 1.4">
+              <div class="hint">Air = 1.4, Methane = 1.31, Propane = 1.13</div>
+            </div>
+            <div class="field" id="fluidZiField" style="display:none;">
+              <label for="fluidZi">Compressibility Factor (<i>Z<sub>i</sub></i>)</label>
+              <input type="number" id="fluidZi" step="0.01" min="0" max="2" value="1.0">
+              <div class="hint">1.0 = ideal gas (default)</div>
+            </div>
           </div>
 
           <!-- ══ ENVIRONMENT ══ -->
@@ -829,30 +861,3 @@
             Run Calculation
           </button>
         </form>
-      </div>
-    </div>
-
-    <!-- ─── RIGHT: RESULTS ─── -->
-    <div class="panel results-col">
-      <div class="panel-header">
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 14l4-4 3 3 5-6" stroke="#188038" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <h2>Calculation Results</h2>
-      </div>
-      <div class="panel-body" id="resultsContainer">
-        <div class="results-placeholder">
-          <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect x="6" y="10" width="36" height="28" rx="4" stroke="#dadce0" stroke-width="2"/><path d="M14 22h20M14 28h14M14 34h8" stroke="#dadce0" stroke-width="2" stroke-linecap="round"/></svg>
-          <p>Fill out the form and run the calculation to see results.</p>
-        </div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Engine scripts (order matters: constants → unitConverter → engine → orchestrator → UI) -->
-  <script src="constants.js"></script>
-  <script src="unitConverter.js"></script>
-  <script src="api2000Engine.js"></script>
-  <script src="index.js"></script>
-  <script src="app.js"></script>
-</body>
-</html>
