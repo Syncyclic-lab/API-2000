@@ -8,8 +8,9 @@
 'use strict';
 
 (function () {
-  const uc     = window.API2000.uc;
-  const engine = window.API2000.engine;
+  const uc       = window.API2000.uc;
+  const engine   = window.API2000.engine;
+  const PHYSICAL = window.API2000.PHYSICAL;
 
   // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -67,19 +68,35 @@
       const relieving_P_kpa = uc.gaugeToAbsKpa(mawp_relieving_kpa);
 
       let env_si = { ...env };
-      if (env.insulation && us === 'US') {
-        env_si = {
-          ...env,
-          insulation: {
-            ...env.insulation,
-            insulation_thickness: env.insulation.thickness * 0.0254,
-            insulation_surface_area: env.insulation.surface_area
-              ? uc.ft2ToM2(env.insulation.surface_area)
-              : undefined,
-            thermal_conductivity: env.insulation.thermal_conductivity * 0.1442,
-            internal_heat_transfer_coeff: env.insulation.internal_heat_transfer_coeff * 5.678,
-          },
-        };
+      if (env.insulation) {
+        const raw = env.insulation;
+        if (us === 'US') {
+          env_si = {
+            ...env,
+            insulation: {
+              ...raw,
+              insulation_thickness: raw.thickness * 0.0254,
+              insulation_surface_area: raw.surface_area
+                ? uc.ft2ToM2(raw.surface_area)
+                : undefined,
+              thermal_conductivity: raw.thermal_conductivity * 0.1442,
+              internal_heat_transfer_coeff: (raw.internal_heat_transfer_coefficient ?? raw.internal_heat_transfer_coeff) * 5.678,
+              coverage_fraction: raw.coverage_fraction,
+            },
+          };
+        } else {
+          env_si = {
+            ...env,
+            insulation: {
+              ...raw,
+              insulation_thickness: raw.thickness * 0.001,
+              insulation_surface_area: raw.surface_area,
+              thermal_conductivity: raw.thermal_conductivity,
+              internal_heat_transfer_coeff: raw.internal_heat_transfer_coefficient ?? raw.internal_heat_transfer_coeff,
+              coverage_fraction: raw.coverage_fraction,
+            },
+          };
+        }
       }
 
       const tank_si = {
@@ -180,28 +197,70 @@
       let actual_venting_result = null;
       
       if (inputs.devices && inputs.devices.length > 0) {
-        // 1. Convert user inputs to SI units (kPa and Nm³/hr)
-        // Note: 1 Nm³/hr ≈ 37.32 SCFH
         const flowToSI = (val) => {
           if (val == null) return null;
-          return us === 'US' ? val / 37.32 : val;
+          return us === 'US' ? uc.scfhToNm3hr(val) : val;
         };
 
-        const actual_devices_si = inputs.devices.map(d => ({
-          ...d,
-          set_pressure: d.set_pressure != null ? uc.toKpa(d.set_pressure, us) : null,
-          set_vacuum:   d.set_vacuum   != null ? uc.toKpa(d.set_vacuum, us)   : null,
-          rated_flow_outbreathing: flowToSI(d.rated_flow_outbreathing),
-          rated_flow_inbreathing:  flowToSI(d.rated_flow_inbreathing),
-        }));
-
-        // 2. Determine relieving vacuum (typically evaluated at MAWV)
+        const AIR = window.API2000.AIR_PROPERTIES;
         const relieving_vacuum_kpa = mawv_kpa;
+        const T_relieving_K = relieving_temp_C + 273.15;
+        const T_ambient_K   = (temp_contents_C ?? 20) + 273.15;
 
-        // 3. Run the engine calculation
+        const actual_devices_si = inputs.devices.map(d => {
+          const dev = {
+            ...d,
+            set_pressure: d.set_pressure != null ? uc.toKpa(d.set_pressure, us) : null,
+            set_vacuum:   d.set_vacuum   != null ? uc.toKpa(d.set_vacuum, us)   : null,
+            rated_flow_outbreathing: flowToSI(d.rated_flow_outbreathing),
+            rated_flow_inbreathing:  flowToSI(d.rated_flow_inbreathing),
+          };
+
+          // Pre-process: calculate capacity for FREE_VENT with pipe geometry
+          if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
+            const pipe_d_m = d.pipe_diameter != null ? uc.pipeDiamToM(d.pipe_diameter, us) : null;
+            const Cd       = d.discharge_coefficient ?? window.API2000.OPEN_VENT.DEFAULT_CD;
+            const k_fluid  = d.specific_heat_ratio ?? null;
+            const Zi_fluid = d.compressibility_factor ?? 1.0;
+            const M_fluid  = fluid.molecular_weight ?? null;
+
+            dev.pipe_diameter_m = pipe_d_m;
+            dev.discharge_coefficient = Cd;
+            dev.specific_heat_ratio = k_fluid;
+            dev.compressibility_factor = Zi_fluid;
+
+            // Outbreathing: tank pressure → atmosphere (fluid properties)
+            if (d.direction === 'BOTH' || d.direction === 'OUTBREATHING') {
+              if (pipe_d_m && k_fluid && M_fluid) {
+                dev.rated_flow_outbreathing = engine.calculateOpenVentCapacity(
+                  pipe_d_m, relieving_P_kpa, PHYSICAL.P_ATM_KPA,
+                  k_fluid, T_relieving_K, M_fluid, Zi_fluid, Cd
+                );
+              } else {
+                dev.rated_flow_outbreathing = 0;
+              }
+            }
+
+            // Inbreathing: atmosphere → tank vacuum (air properties)
+            if (d.direction === 'BOTH' || d.direction === 'INBREATHING') {
+              if (pipe_d_m) {
+                const vacuum_abs_kpa = PHYSICAL.P_ATM_KPA - relieving_vacuum_kpa;
+                dev.rated_flow_inbreathing = engine.calculateOpenVentCapacity(
+                  pipe_d_m, PHYSICAL.P_ATM_KPA, Math.max(vacuum_abs_kpa, 0.1),
+                  AIR.k, T_ambient_K, AIR.M, AIR.Zi, Cd
+                );
+              } else {
+                dev.rated_flow_inbreathing = 0;
+              }
+            }
+          }
+
+          return dev;
+        });
+
         actual_venting_result = engine.calcActualVenting(
-          actual_devices_si, 
-          relieving_P_kpa, 
+          actual_devices_si,
+          relieving_P_kpa,
           relieving_vacuum_kpa
         );
       }
@@ -303,41 +362,4 @@
         mawv_kpa:                 round(mawv_kpa, 3),
         allowable_overpressure_pct: overpressure_pct,
         fill_rate_m3hr:           round(fill_m3hr, 4),
-        empty_rate_m3hr:          round(empty_m3hr, 4),
-        vapor_pressure_kpa:       round(vp_kpa, 4),
-        relieving_pressure_kpa_a: round(relieving_P_kpa, 3),
-        relieving_temp_C:         round(relieving_temp_C, 2),
-        thermal_in_Nm3hr:         round(thermal.thermal_in, 2),
-        thermal_out_Nm3hr:        round(thermal.thermal_out, 2),
-        operational_in_Nm3hr:     round(operational_in, 2),
-        operational_out_Nm3hr:    round(operational_out, 2),
-        total_in_Nm3hr:           round(totals.total_in, 2),
-        total_out_Nm3hr:          round(totals.total_out, 2),
-        wetted_area_m2:           wetted_result ? round(wetted_result.wetted_area_m2, 2) : null,
-        heat_input_W:             heat_input_result ? round(heat_input_result.heat_input_W, 0) : null,
-        emergency_out_Nm3hr:      emergency_result ? round(emergency_result.emergency_out_Nm3hr, 2) : null,
-        governing_out_Nm3hr:      round(governing.governing_out, 2),
-        governing_in_Nm3hr:       round(governing.governing_in, 2),
-        actual_normal_out_Nm3hr: actual_venting_result ? round(actual_venting_result.actual_normal_out, 2) : null,
-        actual_emergency_out_Nm3hr: actual_venting_result ? round(actual_venting_result.actual_emergency_out, 2) : null,
-        actual_in_Nm3hr: actual_venting_result ? round(actual_venting_result.actual_in, 2) : null,
-      };
-
-      return {
-        outputs,
-        intermediates,
-        warnings,
-        errors,
-        engine_version: '1.1.0',
-        calculated_at:  new Date().toISOString(),
-      };
-
-    } catch (err) {
-      errors.push(`Calculation engine error: ${err.message}`);
-      return { outputs: null, intermediates: null, warnings: [], errors, engine_version: '1.1.0' };
-    }
-  }
-
-  // ─── EXPORT ─────────────────────────────────────────────────────────────────
-  window.API2000.runCalculation = runCalculation;
-})();
+        e
