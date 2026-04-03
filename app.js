@@ -15,12 +15,14 @@ const UNITS = {
     vp: 'kPa(a)', fill: 'm³/hr', heat: 'J/kg',
     insulThick: 'mm', insulK: 'W/(m·K)', insulH: 'W/(m²·K)',
     area: 'm²', flow: 'Nm³/hr', heatRate: 'W',
+    pipeDiam: 'mm',
   },
   US: {
     vol: 'BBL', dim: 'ft', press: 'psi(g)', temp: '°F',
     vp: 'psia', fill: 'BPH', heat: 'BTU/lb',
     insulThick: 'in', insulK: 'BTU·in/(hr·ft²·°F)', insulH: 'BTU/(hr·ft²·°F)',
     area: 'ft²', flow: 'SCFH', heatRate: 'BTU/hr',
+    pipeDiam: 'in',
   },
 };
 
@@ -38,6 +40,7 @@ const UNIT_CLASS_MAP = {
   'insul-h-unit':    'insulH',
   'area-unit':       'area',
   'flow-unit':       'flow',
+  'pipe-diam-unit':  'pipeDiam',
 };
 
 // ── DOM References ───────────────────────────────────────────────────────────
@@ -109,6 +112,13 @@ function renderDeviceRow() {
           <option value="INBREATHING">Inbreathing (Vacuum) Only</option>
         </select>
       </div>
+      <div class="field dev-field-capacity-source" style="display:none;">
+        <label>Capacity Source</label>
+        <div class="radio-group">
+          <label class="radio-item"><input type="radio" name="cap-src-${id}" class="dev-cap-src" value="manufacturer" checked><span>Manufacturer Rated</span></label>
+          <label class="radio-item"><input type="radio" name="cap-src-${id}" class="dev-cap-src" value="calculated"><span>Calculate from Pipe Geometry (Eq. 25/26)</span></label>
+        </div>
+      </div>
       <div class="field dev-field-sp">
         <label>Set Pressure <span class="unit press-unit"></span></label>
         <input type="number" step="any" min="0" class="dev-sp" data-field="set_pressure" placeholder="e.g. 0.5">
@@ -132,12 +142,22 @@ function renderDeviceRow() {
         <input type="number" step="any" min="0" class="dev-overpressure" data-field="rated_overpressure" value="10" placeholder="e.g. 10 or 100">
         <div class="hint">Flow capacity rated at this % overpressure</div>
       </div>
+      <div class="field dev-field-pipe-diam" style="display:none;">
+        <label>Pipe Inner Diameter <span class="unit pipe-diam-unit"></span></label>
+        <input type="number" step="any" min="0" class="dev-pipe-diam" data-field="pipe_diameter">
+        <div class="hint">Internal diameter of the vent pipe</div>
+      </div>
+      <div class="field dev-field-cd" style="display:none;">
+        <label>Coefficient of Discharge (C<sub>d</sub>)</label>
+        <input type="number" step="0.01" min="0" max="1" class="dev-cd" data-field="discharge_coefficient" value="0.5">
+        <div class="hint">Typical range: 0.3–0.8 for pipe fittings</div>
+      </div>
     </div>
   `;
 
   deviceRoster.appendChild(card);
-  applyDirectionVisibility(card);
-  updateUnitLabels(); // Ensure unit labels are set on the new card
+  applyTypeVisibility(card);
+  updateUnitLabels(card);
   renumberDeviceCards();
 }
 
@@ -147,18 +167,49 @@ function renderDeviceRow() {
  * currently selected relief direction for a given device card.
  */
 function applyDirectionVisibility(card) {
-  const dir = card.querySelector('.dev-direction').value;
+  const dir  = card.querySelector('.dev-direction').value;
+  const type = card.querySelector('.dev-type').value;
+  const capSrc = card.querySelector('.dev-cap-src:checked')?.value || 'manufacturer';
+  const isCalcFreeVent = type === 'FREE_VENT' && capSrc === 'calculated';
 
   const showPressure = dir === 'BOTH' || dir === 'OUTBREATHING';
   const showVacuum   = dir === 'BOTH' || dir === 'INBREATHING';
 
-  card.querySelector('.dev-field-sp').style.display       = showPressure ? '' : 'none';
-  card.querySelector('.dev-field-flow-out').style.display  = showPressure ? '' : 'none';
-  card.querySelector('.dev-field-sv').style.display        = showVacuum   ? '' : 'none';
-  card.querySelector('.dev-field-flow-in').style.display   = showVacuum   ? '' : 'none';
+  // Free vents have no set pressure / set vacuum / overpressure
+  const showSetP = showPressure && type !== 'FREE_VENT';
+  const showSetV = showVacuum   && type !== 'FREE_VENT';
+  card.querySelector('.dev-field-sp').style.display       = showSetP ? '' : 'none';
+  card.querySelector('.dev-field-sv').style.display       = showSetV ? '' : 'none';
+  card.querySelector('.dev-field-overpressure').style.display = showSetP ? '' : 'none';
 
-  // Overpressure % only meaningful for pressure relief
-  card.querySelector('.dev-field-overpressure').style.display = showPressure ? '' : 'none';
+  // Rated flow fields: only for manufacturer-rated devices
+  card.querySelector('.dev-field-flow-out').style.display = (showPressure && !isCalcFreeVent) ? '' : 'none';
+  card.querySelector('.dev-field-flow-in').style.display  = (showVacuum && !isCalcFreeVent)   ? '' : 'none';
+
+  // Pipe geometry fields: only for calculated free vents
+  card.querySelector('.dev-field-pipe-diam').style.display = isCalcFreeVent ? '' : 'none';
+  card.querySelector('.dev-field-cd').style.display        = isCalcFreeVent ? '' : 'none';
+}
+
+/**
+ * applyTypeVisibility()
+ * Shows or hides type-specific fields (capacity source radio) when device
+ * type changes, and re-runs direction visibility to update dependent fields.
+ */
+function applyTypeVisibility(card) {
+  const type = card.querySelector('.dev-type').value;
+  const isFreeVent = type === 'FREE_VENT';
+
+  card.querySelector('.dev-field-capacity-source').style.display = isFreeVent ? '' : 'none';
+
+  // Reset to manufacturer if switching away from FREE_VENT
+  if (!isFreeVent) {
+    const mfgRadio = card.querySelector('.dev-cap-src[value="manufacturer"]');
+    if (mfgRadio) mfgRadio.checked = true;
+  }
+
+  applyDirectionVisibility(card);
+  updateFluidFieldsVisibility();
 }
 
 /**
@@ -181,15 +232,35 @@ function renumberDeviceCards() {
 function collectDeviceData() {
   const devices = [];
   deviceRoster.querySelectorAll('.device-card').forEach(card => {
-    const dir = card.querySelector('.dev-direction').value;
+    const dir  = card.querySelector('.dev-direction').value;
+    const type = card.querySelector('.dev-type').value;
 
-    const device = {
-      type:      card.querySelector('.dev-type').value,
-      direction: dir,
-    };
+    const device = { type, direction: dir };
+
+    // Capacity source for FREE_VENT
+    if (type === 'FREE_VENT') {
+      const capSrc = card.querySelector('.dev-cap-src:checked')?.value || 'manufacturer';
+      device.capacity_source = capSrc;
+
+      if (capSrc === 'calculated') {
+        const pd = parseFloat(card.querySelector('.dev-pipe-diam').value);
+        if (!isNaN(pd)) device.pipe_diameter = pd;
+
+        const cd = parseFloat(card.querySelector('.dev-cd').value);
+        if (!isNaN(cd)) device.discharge_coefficient = cd;
+
+        // Pull k and Zi from fluid section
+        const kVal = num('fluidK');
+        if (kVal != null) device.specific_heat_ratio = kVal;
+        const ziVal = num('fluidZi');
+        if (ziVal != null) device.compressibility_factor = ziVal;
+      }
+    }
 
     // Only collect fields that are relevant to the selected direction
-    if (dir === 'BOTH' || dir === 'OUTBREATHING') {
+    const isCalcFreeVent = type === 'FREE_VENT' && device.capacity_source === 'calculated';
+
+    if ((dir === 'BOTH' || dir === 'OUTBREATHING') && !isCalcFreeVent) {
       const sp = parseFloat(card.querySelector('.dev-sp').value);
       if (!isNaN(sp)) device.set_pressure = sp;
 
@@ -200,7 +271,7 @@ function collectDeviceData() {
       if (!isNaN(op)) device.rated_overpressure_pct = op;
     }
 
-    if (dir === 'BOTH' || dir === 'INBREATHING') {
+    if ((dir === 'BOTH' || dir === 'INBREATHING') && !isCalcFreeVent) {
       const sv = parseFloat(card.querySelector('.dev-sv').value);
       if (!isNaN(sv)) device.set_vacuum = sv;
 
@@ -213,7 +284,24 @@ function collectDeviceData() {
   return devices;
 }
 
-// Event delegation for device roster: remove cards & direction changes
+/**
+ * updateFluidFieldsVisibility()
+ * Shows the k and Zi fluid fields only when at least one device uses
+ * calculated pipe-geometry capacity, to avoid confusing users otherwise.
+ */
+function updateFluidFieldsVisibility() {
+  const hasCalcFreeVent = Array.from(deviceRoster.querySelectorAll('.device-card')).some(card => {
+    const type = card.querySelector('.dev-type').value;
+    const src  = card.querySelector('.dev-cap-src:checked')?.value;
+    return type === 'FREE_VENT' && src === 'calculated';
+  });
+  const kField  = $('fluidKField');
+  const ziField = $('fluidZiField');
+  if (kField)  kField.style.display  = hasCalcFreeVent ? '' : 'none';
+  if (ziField) ziField.style.display = hasCalcFreeVent ? '' : 'none';
+}
+
+// Event delegation for device roster: remove cards, direction & type changes
 deviceRoster.addEventListener('click', (e) => {
   const removeBtn = e.target.closest('[data-remove-device]');
   if (removeBtn) {
@@ -222,14 +310,24 @@ deviceRoster.addEventListener('click', (e) => {
     if (card) {
       card.remove();
       renumberDeviceCards();
+      updateFluidFieldsVisibility();
     }
   }
 });
 
 deviceRoster.addEventListener('change', (e) => {
+  const card = e.target.closest('.device-card');
+  if (!card) return;
+
   if (e.target.classList.contains('dev-direction')) {
-    const card = e.target.closest('.device-card');
-    if (card) applyDirectionVisibility(card);
+    applyDirectionVisibility(card);
+  }
+  if (e.target.classList.contains('dev-type')) {
+    applyTypeVisibility(card);
+  }
+  if (e.target.classList.contains('dev-cap-src')) {
+    applyDirectionVisibility(card);
+    updateFluidFieldsVisibility();
   }
 });
 
@@ -240,11 +338,12 @@ renderDeviceRow();
 
 // ── Unit label updater ───────────────────────────────────────────────────────
 
-function updateUnitLabels() {
+function updateUnitLabels(scope) {
+  const root = scope || document;
   const us = unitSystemSelect.value;
   const units = UNITS[us];
   for (const [cls, key] of Object.entries(UNIT_CLASS_MAP)) {
-    document.querySelectorAll(`.${cls}`).forEach(el => {
+    root.querySelectorAll(`.${cls}`).forEach(el => {
       el.textContent = units[key];
     });
   }
@@ -281,7 +380,8 @@ function updateVolatilityIndicator() {
     volatilityIndicator.className = 'volatility-badge neutral';
     return;
   }
-  const threshold = us === 'SI' ? 5.0 : 0.725;
+  const OP = window.API2000.OPERATIONAL;
+  const threshold = us === 'SI' ? OP.VOLATILE_VP_THRESHOLD_KPA : OP.VOLATILE_VP_THRESHOLD_PSIA;
   const isVolatile = vp > threshold;
   const threshLabel = us === 'SI' ? '5 kPa' : '0.725 psia';
   if (isVolatile) {
@@ -349,7 +449,8 @@ function assemblePayload() {
   // Fluid
   // API 2000 §6.3.2: volatile if VP > 5 kPa (≈ 0.725 psia)
   const vp = num('vaporPressure');
-  const volatilityThreshold = us === 'SI' ? 5.0 : 0.725;
+  const OPS = window.API2000.OPERATIONAL;
+  const volatilityThreshold = us === 'SI' ? OPS.VOLATILE_VP_THRESHOLD_KPA : OPS.VOLATILE_VP_THRESHOLD_PSIA;
   const isVolatile = (vp != null && vp > volatilityThreshold);
 
   const fluid = {
@@ -358,13 +459,20 @@ function assemblePayload() {
     max_fill_rate:  num('maxFillRate'),
     max_empty_rate: num('maxEmptyRate'),
   };
-  if (str('fluidName'))                fluid.name = str('fluidName');
-  if (num('operatingTemp') != null)    fluid.normal_operating_temp = num('operatingTemp');
-  if (num('latentHeat') != null)       fluid.latent_heat_of_vaporization = num('latentHeat');
-  if (num('molWeight') != null)        fluid.molecular_weight = num('molWeight');
-  if (num('relievingTemp') != null)    fluid.relieving_vapor_temp = num('relievingTemp');
-  if (num('flashPoint') != null)       fluid.flash_point = num('flashPoint');
-  if (num('specificGravity') != null)  fluid.specific_gravity = num('specificGravity');
+  const fluidName = str('fluidName');
+  if (fluidName)                       fluid.name = fluidName;
+  const operTemp = num('operatingTemp');
+  if (operTemp != null)                fluid.normal_operating_temp = operTemp;
+  const latent = num('latentHeat');
+  if (latent != null)                  fluid.latent_heat_of_vaporization = latent;
+  const molWt = num('molWeight');
+  if (molWt != null)                   fluid.molecular_weight = molWt;
+  const relTemp = num('relievingTemp');
+  if (relTemp != null)                 fluid.relieving_vapor_temp = relTemp;
+  const flash = num('flashPoint');
+  if (flash != null)                   fluid.flash_point = flash;
+  const sg = num('specificGravity');
+  if (sg != null)                      fluid.specific_gravity = sg;
 
   // Environment
   const environment = {
@@ -373,12 +481,17 @@ function assemblePayload() {
   };
   if (insulationType.value !== 'UNINSULATED') {
     const ins = {};
-    if (num('insulThickness') != null)    ins.thickness = num('insulThickness');
-    if (num('insulSurfArea') != null)     ins.surface_area = num('insulSurfArea');
-    if (num('insulConductivity') != null) ins.thermal_conductivity = num('insulConductivity');
-    if (num('insulHTC') != null)          ins.internal_heat_transfer_coefficient = num('insulHTC');
-    if (insulationType.value === 'PARTIALLY_INSULATED' && num('coverageFraction') != null) {
-      ins.coverage_fraction = num('coverageFraction');
+    const thick = num('insulThickness');
+    if (thick != null)                    ins.thickness = thick;
+    const surfA = num('insulSurfArea');
+    if (surfA != null)                    ins.surface_area = surfA;
+    const condK = num('insulConductivity');
+    if (condK != null)                    ins.thermal_conductivity = condK;
+    const htc = num('insulHTC');
+    if (htc != null)                      ins.internal_heat_transfer_coefficient = htc;
+    if (insulationType.value === 'PARTIALLY_INSULATED') {
+      const covFrac = num('coverageFraction');
+      if (covFrac != null) ins.coverage_fraction = covFrac;
     }
     if (Object.keys(ins).length > 0) environment.insulation = ins;
   }
@@ -448,10 +561,10 @@ function tableRow(label, value, highlight) {
   return `<tr${highlight ? ' class="highlight"' : ''}><th>${safeLabel}</th><td>${safeValue}</td></tr>`;
 }
 
+const _escapeDiv = document.createElement('div');
 function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  _escapeDiv.textContent = str;
+  return _escapeDiv.innerHTML;
 }
 
 // ── Render full results ──────────────────────────────────────────────────────
@@ -672,97 +785,4 @@ function renderResults(result) {
           <span class="arrow">▶</span>
         </div>
         <div class="collapsible-body">
-          <table class="result-table">
-            ${tableRow('Volume', fmtVal(im.volume_m3, 'm³'))}
-            ${tableRow('MAWP', fmtVal(im.mawp_kpa, 'kPa'))}
-            ${tableRow('MAWV', fmtVal(im.mawv_kpa, 'kPa'))}
-            ${tableRow('Fill Rate', fmtVal(im.fill_rate_m3hr, 'm³/hr'))}
-            ${tableRow('Empty Rate', fmtVal(im.empty_rate_m3hr, 'm³/hr'))}
-            ${tableRow('Vapor Pressure', fmtVal(im.vapor_pressure_kpa, 'kPa(a)'))}
-            ${tableRow('Relieving Pressure', fmtVal(im.relieving_pressure_kpa_a, 'kPa(a)'))}
-            ${tableRow('Relieving Temp', fmtVal(im.relieving_temp_C, '°C'))}
-            ${tableRow('Thermal In', fmtVal(im.thermal_in_Nm3hr, 'Nm³/hr'))}
-            ${tableRow('Thermal Out', fmtVal(im.thermal_out_Nm3hr, 'Nm³/hr'))}
-            ${tableRow('Operational In', fmtVal(im.operational_in_Nm3hr, 'Nm³/hr'))}
-            ${tableRow('Operational Out', fmtVal(im.operational_out_Nm3hr, 'Nm³/hr'))}
-            ${tableRow('Total In', fmtVal(im.total_in_Nm3hr, 'Nm³/hr'))}
-            ${tableRow('Total Out', fmtVal(im.total_out_Nm3hr, 'Nm³/hr'))}
-            ${tableRow('Wetted Area', fmtVal(im.wetted_area_m2, 'm²'))}
-            ${tableRow('Heat Input', fmtVal(im.heat_input_W, 'W'))}
-            ${tableRow('Emergency Out', fmtVal(im.emergency_out_Nm3hr, 'Nm³/hr'))}
-            ${tableRow('Governing Out', fmtVal(im.governing_out_Nm3hr, 'Nm³/hr'))}
-            ${tableRow('Governing In', fmtVal(im.governing_in_Nm3hr, 'Nm³/hr'))}
-          </table>
-        </div>
-      </div>`;
-  }
-
-  // Engine info
-  html += `
-    <div style="margin-top:16px; font-size:0.75rem; color:#bdc1c6; text-align:right;">
-      Engine v${result.engine_version || '—'} &bull; ${result.calculated_at ? new Date(result.calculated_at).toLocaleString() : ''}
-    </div>`;
-
-  resultsContainer.innerHTML = html;
-
-  // Bind collapsible toggles (replaces inline onclick for CSP compliance)
-  resultsContainer.querySelectorAll('[data-collapsible]').forEach(toggle => {
-    toggle.addEventListener('click', () => {
-      toggle.classList.toggle('open');
-      toggle.nextElementSibling.classList.toggle('open');
-    });
-  });
-}
-
-// ── Render validation errors from server ─────────────────────────────────────
-
-function renderValidationErrors(details) {
-  const msgs = details.map(d => {
-    const path = d.instancePath || d.dataPath || '';
-    const msg  = d.message || 'Validation error';
-    return `${path} ${msg}`.trim();
-  });
-  resultsContainer.innerHTML =
-    `<div class="alert alert-error">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-      <div>
-        <strong>Validation Failed</strong>
-        <ul style="margin:6px 0 0 16px; font-size:0.83rem;">
-          ${msgs.map(m => `<li>${escapeHtml(m)}</li>`).join('')}
-        </ul>
-      </div>
-    </div>`;
-}
-
-// ── Form submission ──────────────────────────────────────────────────────────
-
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  // Set loading state
-  calcBtn.disabled = true;
-  calcBtn.innerHTML = '<span class="spinner"></span> Calculating…';
-  resultsContainer.innerHTML = `
-    <div class="results-placeholder">
-      <span class="spinner" style="border-color:rgba(0,0,0,.1); border-top-color:#1a73e8; width:28px; height:28px; border-width:3px;"></span>
-      <p style="margin-top:12px;">Running API 2000 calculations…</p>
-    </div>`;
-
-  try {
-    const payload = assemblePayload();
-
-    // Run calculation client-side (no server needed)
-    const result = window.API2000.runCalculation(payload);
-    renderResults(result);
-
-  } catch (err) {
-    resultsContainer.innerHTML = `
-      <div class="alert alert-error">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <span><strong>Request failed:</strong> ${escapeHtml(err.message)}</span>
-      </div>`;
-  } finally {
-    calcBtn.innerHTML = 'Run Calculation';
-    calcBtn.disabled = !disclaimerCheck.checked;
-  }
-});
+          <table class="resul
