@@ -247,7 +247,45 @@
     };
   }
 
-  // ─── 8.5 ACTUAL VENTING DEVICES (PHASE 3) ───────────────────────────────────
+  // ─── 8.5 OPEN VENT CAPACITY (API 2000 Eq. 25 — SI) ──────────────────────────
+
+  /**
+   * Compressible flow through an open vent per API 2000 Eq. 25 (SI).
+   * All inputs are in SI: diameter in m, pressures in kPa(a), temperature in K.
+   * Returns volumetric flow in Nm³/hr (at 0 °C, 101.325 kPa).
+   */
+  function calculateOpenVentCapacity(diameter_m, p_inlet_kpa, p_outlet_kpa, k, T_inlet_K, M, Zi, Cd) {
+    if (!diameter_m || !p_inlet_kpa || !p_outlet_kpa || !k || !T_inlet_K || !M) return 0;
+    if (p_outlet_kpa >= p_inlet_kpa) return 0;
+
+    const A_m2 = Math.PI * Math.pow(diameter_m / 2, 2);
+    const P1   = p_inlet_kpa * 1000;   // Pa
+    const P2   = p_outlet_kpa * 1000;  // Pa
+    const R    = PHYSICAL.R_SI;         // 8314.46 J/(kmol·K)
+
+    const r      = P2 / P1;
+    const r_crit = Math.pow(2 / (k + 1), k / (k - 1));
+
+    let Fk;
+    if (r <= r_crit) {
+      // Critical (choked) flow
+      Fk = Math.sqrt(k * Math.pow(2 / (k + 1), (k + 1) / (k - 1)));
+    } else {
+      // Subsonic flow
+      Fk = Math.sqrt((k / (k - 1)) * (Math.pow(r, 2 / k) - Math.pow(r, (k + 1) / k)));
+    }
+
+    // Mass flow rate (kg/s)
+    const m_dot = Cd * A_m2 * P1 * Math.sqrt(2 * M / (Zi * R * T_inlet_K)) * Fk;
+
+    // Convert to Nm³/hr: (kg/s) / (kg/kmol) × (22.414 m³/kmol) × 3600 s/hr
+    const MOLAR_VOL_NM3 = 22.414;
+    const q_Nm3hr = (m_dot / M) * MOLAR_VOL_NM3 * 3600;
+
+    return q_Nm3hr;
+  }
+
+  // ─── 8.6 ACTUAL VENTING DEVICES (PHASE 3) ──────────────────────────────────
 
   /**
    * Calculates the actual flow for a single device given a specific tank pressure.
@@ -255,7 +293,8 @@
    */
   function calcDeviceFlow(setPressure, ratedFlow, overpressurePct, tankPressure) {
     if (setPressure == null || ratedFlow == null || tankPressure == null) return 0;
-    
+    if (overpressurePct == null) overpressurePct = 0;
+
     // If the tank hasn't reached the set pressure, the valve is closed
     if (tankPressure <= setPressure) return 0;
 
@@ -456,67 +495,22 @@
         );
       }
 
+      const VENT_LIMITS = window.API2000.OPEN_VENT;
+
       devices.forEach((d, i) => {
         const label = `Device #${i + 1} (${d.type})`;
 
-        // Set pressure exceeds MAWP
-        if (d.set_pressure != null && mawp_kpa != null && d.set_pressure > mawp_kpa) {
-          warnings.push(
-            `WARNING: ${label} set pressure (${d.set_pressure.toFixed(2)} kPa) ` +
-            `exceeds the tank MAWP (${mawp_kpa.toFixed(2)} kPa). ` +
-            `The device may not open before the tank's design pressure is exceeded.`
-          );
-        }
-
-        // Set vacuum exceeds MAWV
-        if (d.set_vacuum != null && mawv_kpa != null && d.set_vacuum > mawv_kpa) {
-          warnings.push(
-            `WARNING: ${label} set vacuum (${d.set_vacuum.toFixed(2)} kPa) ` +
-            `exceeds the tank MAWV (${mawv_kpa.toFixed(2)} kPa). ` +
-            `The device may not open before the tank's design vacuum is exceeded.`
-          );
-        }
-
-        // Outbreathing direction but missing rated flow
-        if ((d.direction === 'BOTH' || d.direction === 'OUTBREATHING') &&
-            (d.rated_flow_outbreathing == null || d.rated_flow_outbreathing <= 0)) {
-          warnings.push(
-            `NOTICE: ${label} is configured for outbreathing but has no rated ` +
-            `outbreathing flow. Its pressure relief contribution will be zero.`
-          );
-        }
-
-        // Inbreathing direction but missing rated flow
-        if ((d.direction === 'BOTH' || d.direction === 'INBREATHING') &&
-            (d.rated_flow_inbreathing == null || d.rated_flow_inbreathing <= 0)) {
-          warnings.push(
-            `NOTICE: ${label} is configured for inbreathing but has no rated ` +
-            `inbreathing flow. Its vacuum relief contribution will be zero.`
-          );
-        }
-      });
-    }
-
-    return warnings;
-  }
-
-  // ─── EXPORT ─────────────────────────────────────────────────────────────────
-  window.API2000.engine = {
-    logLogInterp,
-    tableInterp,
-    calcThermalVentingBare,
-    applyInsulationFactor,
-    calcOperationalInbreathing,
-    calcOperationalOutbreathing,
-    calcWettedArea,
-    calcFireHeatInputBare,
-    calcFireHeatInputInsulated,
-    calcFireHeatInput,
-    calcEmergencyOutbreathing,
-    calcTotalNormalVenting,
-    calcGoverning,
-    calcDeviceFlow,
-    calcActualVenting,
-    generateWarnings,
-  };
-})();
+        // Open-vent calculated capacity warnings
+        if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
+          if (d.specific_heat_ratio == null || d.compressibility_factor == null) {
+            warnings.push(
+              `WARNING: ${label} uses calculated capacity but the ratio of specific ` +
+              `heats (k) or compressibility factor (Zi) is missing. ` +
+              `Calculated flow will be zero.`
+            );
+          }
+          if (d.discharge_coefficient != null &&
+              (d.discharge_coefficient < VENT_LIMITS.CD_MIN || d.discharge_coefficient > VENT_LIMITS.CD_MAX)) {
+            warnings.push(
+              `WARNING: ${label} discharge coefficient (Cd = ${d.discharge_coefficient}) ` +
+              `is outside the typical range of ${VENT_LIMITS.CD_MIN}–${VE
