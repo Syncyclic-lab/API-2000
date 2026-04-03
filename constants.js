@@ -107,24 +107,22 @@ window.API2000.OPERATIONAL = {
   VOLATILE_VP_THRESHOLD_PSIA: 0.725,
 };
 
-// ─── UNIT CONVERSIONS ─────────────────────────────────────────────────────────
+// ─── AIR PROPERTIES (for inbreathing through open vents) ─────────────────────
 
-window.API2000.CONVERSIONS = {
-  BBL_TO_M3:       0.158987,
-  M3_TO_BBL:       6.28981,
-  FT3_PER_BBL:     5.614583,
-  SCFH_TO_NM3HR:   0.026853,
-  NM3HR_TO_SCFH:  37.2399,
-  FT2_TO_M2:       0.092903,
-  M2_TO_FT2:      10.7639,
-  BTU_HR_TO_W:     0.293071,
-  W_TO_BTU_HR:     3.41214,
-  BTU_LB_TO_J_KG:  2326.0,
-  J_KG_TO_BTU_LB:  4.2992e-4,
-  PSI_TO_KPA:      6.89476,
-  KPA_TO_PSI:      0.145038,
-  FT_TO_M:         0.3048,
-  M_TO_FT:         3.28084,
-  F_TO_R:        459.67,
-  C_TO_K:        273.15,
+window.API2000.AIR_PROPERTIES = {
+  k:  1.4,
+  M:  28.96,
+  Zi: 1.0,
 };
+
+// ─── OPEN VENT DEFAULTS ──────────────────────────────────────────────────────
+
+window.API2000.OPEN_VENT = {
+  DEFAULT_CD:   0.5,
+  CD_MIN:       0.3,
+  CD_MAX:       0.8,
+  MIN_PIPE_DIAM_IN: 1.0,
+  MIN_PIPE_DIAM_MM: 25.4,
+};
+
+// ─── UNIT CONVERSIONS ─────────────────────────────────────────────
