@@ -349,7 +349,7 @@ function updateUnitLabels(scope) {
   }
 }
 
-unitSystemSelect.addEventListener('change', updateUnitLabels);
+unitSystemSelect.addEventListener('change', () => updateUnitLabels());
 updateUnitLabels(); // initial run
 
 // ── Disclaimer toggle ────────────────────────────────────────────────────────
