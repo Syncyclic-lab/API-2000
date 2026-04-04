@@ -126,3 +126,35 @@ window.API2000.OPEN_VENT = {
 };
 
 // ─── UNIT CONVERSIONS ─────────────────────────────────────────────
+
+window.API2000.CONVERSIONS = {
+  // Volume
+  BBL_TO_M3:    0.158987,
+  M3_TO_BBL:    6.28981,
+
+  // Volumetric flow
+  SCFH_TO_NM3HR: 0.02832,
+  NM3HR_TO_SCFH: 35.3147,
+
+  // Area
+  FT2_TO_M2: 0.092903,
+  M2_TO_FT2: 10.7639,
+
+  // Length
+  FT_TO_M: 0.3048,
+  M_TO_FT: 3.28084,
+
+  // Pressure
+  PSI_TO_KPA: 6.89476,
+  KPA_TO_PSI: 0.145038,
+
+  // Temperature offsets
+  F_TO_R:  459.67,
+  C_TO_K:  273.15,
+
+  // Heat / Enthalpy
+  BTU_HR_TO_W:   0.293071,
+  W_TO_BTU_HR:   3.41214,
+  BTU_LB_TO_J_KG: 2326.0,
+  J_KG_TO_BTU_LB: 0.000429923,
+};
