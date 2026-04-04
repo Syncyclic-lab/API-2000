@@ -83,4 +83,13 @@
   // ─── EXPORT ─────────────────────────────────────────────────────────────────
   window.API2000.uc = {
     bblToM3, m3ToBbl, toM3,
-    scfhToNm3hr, nm3hrToSc
+    scfhToNm3hr, nm3hrToScfh, liquidFlowToM3hr, ventingFlowToOutput,
+    ft2ToM2, m2ToFt2, toM2, areaToOutput,
+    ftToM, mToFt, toMetres,
+    psiToKpa, kpaToPsi, toKpa, gaugeToAbsKpa,
+    fToC, cToF, fToR, cToK, toC,
+    btuhrToW, wToBtuhr, btulbToJkg, jkgToBtulb, toJkg, heatToOutput,
+    inToM, mmToM, pipeDiamToM,
+    convertDimsToSI,
+  };
+})();
