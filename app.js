@@ -1,5 +1,5 @@
 // ============================================================
-// public/app.js  –  API 2000 Venting Calculator Frontend
+// public/app.js  â  API 2000 Venting Calculator Frontend
 // Gathers form inputs, assembles the JSON payload per
 // input.schema.json, calls the backend, and renders
 // formatted results.
@@ -7,26 +7,26 @@
 
 'use strict';
 
-// ── Unit label maps (keyed by unit system) ───────────────────────────────────
+// ââ Unit label maps (keyed by unit system) âââââââââââââââââââââââââââââââââââ
 
 const UNITS = {
   SI: {
-    vol: 'm³', dim: 'm', press: 'kPa(g)', temp: '°C',
-    vp: 'kPa(a)', fill: 'm³/hr', heat: 'J/kg',
-    insulThick: 'mm', insulK: 'W/(m·K)', insulH: 'W/(m²·K)',
-    area: 'm²', flow: 'Nm³/hr', heatRate: 'W',
+    vol: 'mÂ³', dim: 'm', press: 'kPa(g)', temp: 'Â°C',
+    vp: 'kPa(a)', fill: 'mÂ³/hr', heat: 'J/kg',
+    insulThick: 'mm', insulK: 'W/(mÂ·K)', insulH: 'W/(mÂ²Â·K)',
+    area: 'mÂ²', flow: 'NmÂ³/hr', heatRate: 'W',
     pipeDiam: 'mm',
   },
   US: {
-    vol: 'BBL', dim: 'ft', press: 'psi(g)', temp: '°F',
+    vol: 'BBL', dim: 'ft', press: 'psi(g)', temp: 'Â°F',
     vp: 'psia', fill: 'BPH', heat: 'BTU/lb',
-    insulThick: 'in', insulK: 'BTU·in/(hr·ft²·°F)', insulH: 'BTU/(hr·ft²·°F)',
-    area: 'ft²', flow: 'SCFH', heatRate: 'BTU/hr',
+    insulThick: 'in', insulK: 'BTUÂ·in/(hrÂ·ftÂ²Â·Â°F)', insulH: 'BTU/(hrÂ·ftÂ²Â·Â°F)',
+    area: 'ftÂ²', flow: 'SCFH', heatRate: 'BTU/hr',
     pipeDiam: 'in',
   },
 };
 
-// Map of CSS class → UNITS key for dynamic label swapping
+// Map of CSS class â UNITS key for dynamic label swapping
 const UNIT_CLASS_MAP = {
   'vol-unit':        'vol',
   'dim-unit':        'dim',
@@ -43,7 +43,7 @@ const UNIT_CLASS_MAP = {
   'pipe-diam-unit':  'pipeDiam',
 };
 
-// ── DOM References ───────────────────────────────────────────────────────────
+// ââ DOM References âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 const $  = (id) => document.getElementById(id);
 const form              = $('calcForm');
@@ -55,7 +55,7 @@ const insulationFields  = $('insulationFields');
 const coverageField     = $('coverageFractionField');
 const unitSystemSelect  = $('unitSystem');
 
-// ── Tab Switching ──────────────────────────────────────────────────────────
+// ââ Tab Switching ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 document.querySelectorAll('.tab-button').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -70,14 +70,14 @@ document.querySelectorAll('.tab-button').forEach(btn => {
   });
 });
 
-// ── Actual Venting Device Management ─────────────────────────────────────────
+// ââ Actual Venting Device Management âââââââââââââââââââââââââââââââââââââââââ
 
 const btnAddDevice = $('btnAddDevice');
 const deviceRoster = $('deviceRoster');
 let deviceIdCounter = 0;
 
 /**
- * renderDeviceRow()  –  Phase 2 (Step 2.3)
+ * renderDeviceRow()  â  Phase 2 (Step 2.3)
  * Injects a new device card into the DOM with all required fields.
  * Fields conditionally show/hide based on the selected relief direction.
  */
@@ -150,7 +150,7 @@ function renderDeviceRow() {
       <div class="field dev-field-cd" style="display:none;">
         <label>Coefficient of Discharge (C<sub>d</sub>)</label>
         <input type="number" step="0.01" min="0" max="1" class="dev-cd" data-field="discharge_coefficient" value="0.5">
-        <div class="hint">Typical range: 0.3–0.8 for pipe fittings</div>
+        <div class="hint">Typical range: 0.3â0.8 for pipe fittings</div>
       </div>
     </div>
   `;
@@ -214,7 +214,7 @@ function applyTypeVisibility(card) {
 
 /**
  * renumberDeviceCards()
- * Re-labels the visible device cards sequentially (Device #1, #2, …)
+ * Re-labels the visible device cards sequentially (Device #1, #2, â¦)
  * after any addition or removal so numbering stays tidy.
  */
 function renumberDeviceCards() {
@@ -225,7 +225,7 @@ function renumberDeviceCards() {
 }
 
 /**
- * collectDeviceData()  –  Phase 2 (Step 2.3)
+ * collectDeviceData()  â  Phase 2 (Step 2.3)
  * Scrapes every device card in the DOM and returns a clean array of
  * device objects suitable for the calculation payload.
  */
@@ -336,7 +336,7 @@ btnAddDevice.addEventListener('click', renderDeviceRow);
 // Add one device by default to prompt the user
 renderDeviceRow();
 
-// ── Unit label updater ───────────────────────────────────────────────────────
+// ââ Unit label updater âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function updateUnitLabels(scope) {
   const root = scope || document;
@@ -352,13 +352,13 @@ function updateUnitLabels(scope) {
 unitSystemSelect.addEventListener('change', () => updateUnitLabels());
 updateUnitLabels(); // initial run
 
-// ── Disclaimer toggle ────────────────────────────────────────────────────────
+// ââ Disclaimer toggle ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 disclaimerCheck.addEventListener('change', () => {
   calcBtn.disabled = !disclaimerCheck.checked;
 });
 
-// ── Insulation visibility toggle ─────────────────────────────────────────────
+// ââ Insulation visibility toggle âââââââââââââââââââââââââââââââââââââââââââââ
 
 insulationType.addEventListener('change', () => {
   const show = insulationType.value !== 'UNINSULATED';
@@ -367,7 +367,7 @@ insulationType.addEventListener('change', () => {
     insulationType.value === 'PARTIALLY_INSULATED' ? '' : 'none';
 });
 
-// ── Auto-determine volatility from vapor pressure ────────────────────────────
+// ââ Auto-determine volatility from vapor pressure ââââââââââââââââââââââââââââ
 
 const volatilityIndicator = $('volatilityIndicator');
 const vaporPressureInput  = $('vaporPressure');
@@ -388,7 +388,7 @@ function updateVolatilityIndicator() {
     volatilityIndicator.textContent = `Volatile (VP > ${threshLabel})`;
     volatilityIndicator.className = 'volatility-badge volatile';
   } else {
-    volatilityIndicator.textContent = `Non-Volatile (VP ≤ ${threshLabel})`;
+    volatilityIndicator.textContent = `Non-Volatile (VP â¤ ${threshLabel})`;
     volatilityIndicator.className = 'volatility-badge non-volatile';
   }
 }
@@ -397,7 +397,7 @@ vaporPressureInput.addEventListener('input', updateVolatilityIndicator);
 unitSystemSelect.addEventListener('change', updateVolatilityIndicator);
 updateVolatilityIndicator(); // initial run
 
-// ── Helper: read numeric input (returns undefined if blank) ──────────────────
+// ââ Helper: read numeric input (returns undefined if blank) ââââââââââââââââââ
 
 function num(id) {
   const v = $(id).value.trim();
@@ -413,7 +413,7 @@ function bool(id) {
   return $(id).checked;
 }
 
-// ── Assemble payload ─────────────────────────────────────────────────────────
+// ââ Assemble payload âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function assemblePayload() {
   const us = unitSystemSelect.value;
@@ -447,7 +447,7 @@ function assemblePayload() {
   if (elev != null) tank.elevation_above_grade = elev;
 
   // Fluid
-  // API 2000 §6.3.2: volatile if VP > 5 kPa (≈ 0.725 psia)
+  // API 2000 Â§6.3.2: volatile if VP > 5 kPa (â 0.725 psia)
   const vp = num('vaporPressure');
   const OPS = window.API2000.OPERATIONAL;
   const volatilityThreshold = us === 'SI' ? OPS.VOLATILE_VP_THRESHOLD_KPA : OPS.VOLATILE_VP_THRESHOLD_PSIA;
@@ -530,10 +530,10 @@ function assemblePayload() {
   return { meta, tank, fluid, environment, abnormal_scenarios, calculation_options, devices };
 }
 
-// ── Render helpers ───────────────────────────────────────────────────────────
+// ââ Render helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function fmtVal(v, unit) {
-  if (v == null || v === '') return '—';
+  if (v == null || v === '') return 'â';
   return `${Number(v).toLocaleString('en-US', { maximumFractionDigits: 4 })} ${unit || ''}`.trim();
 }
 
@@ -571,7 +571,7 @@ function escapeHtml(str) {
   return _escapeDiv.innerHTML;
 }
 
-// ── Render full results ──────────────────────────────────────────────────────
+// ââ Render full results âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function renderResults(result) {
   // Handle error-only responses
@@ -591,7 +591,7 @@ function renderResults(result) {
   html += renderWarnings(result.warnings);
   html += renderErrors(result.errors);
 
-  // ── Phase 5: Compliance Summary Dashboard ───────────────────────────────
+  // ââ Phase 5: Compliance Summary Dashboard âââââââââââââââââââââââââââââââ
   if (o.actual_venting && o.governing) {
     const av = o.actual_venting;
     const ad = av.adequacy;
@@ -602,7 +602,7 @@ function renderResults(result) {
       : '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     const headerLabel = allPass
       ? 'All Venting Requirements Met'
-      : 'Venting Deficiency Detected — Review Required';
+      : 'Venting Deficiency Detected â Review Required';
 
     const passIcon = '<svg class="status-pass" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6 9.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     const failIcon = '<svg class="status-fail" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 6.5l5 5M11.5 6.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
@@ -663,17 +663,17 @@ function renderResults(result) {
         <table class="result-table">
           ${tableRow('Governing Outbreathing (pressure)', fmtVal(o.governing.governing_outbreathing, fu))}
           ${tableRow('Governing Inbreathing (vacuum)', fmtVal(o.governing.governing_inbreathing, fu))}
-          ${tableRow('Emergency Governs?', o.governing.emergency_governs ? 'Yes — Fire case controls outbreathing' : 'No — Normal venting controls')}
+          ${tableRow('Emergency Governs?', o.governing.emergency_governs ? 'Yes â Fire case controls outbreathing' : 'No â Normal venting controls')}
         </table>
       </div>`;
   }
 
-  // Normal venting — Thermal
+  // Normal venting â Thermal
   if (o.normal_venting) {
     const nv = o.normal_venting;
     html += `
       <div class="result-section">
-        <h3>Normal Venting — Thermal Breathing</h3>
+        <h3>Normal Venting â Thermal Breathing</h3>
         <table class="result-table">
           ${tableRow('Thermal Inbreathing', fmtVal(nv.thermal.inbreathing, fu))}
           ${tableRow('Thermal Outbreathing', fmtVal(nv.thermal.outbreathing, fu))}
@@ -682,10 +682,10 @@ function renderResults(result) {
         </table>
       </div>`;
 
-    // Normal venting — Operational
+    // Normal venting â Operational
     html += `
       <div class="result-section">
-        <h3>Normal Venting — Operational Breathing</h3>
+        <h3>Normal Venting â Operational Breathing</h3>
         <table class="result-table">
           ${tableRow('Operational Inbreathing', fmtVal(nv.operational.inbreathing, fu))}
           ${tableRow('Operational Outbreathing', fmtVal(nv.operational.outbreathing, fu))}
@@ -694,10 +694,10 @@ function renderResults(result) {
         </table>
       </div>`;
 
-    // Normal venting — Totals
+    // Normal venting â Totals
     html += `
       <div class="result-section">
-        <h3>Normal Venting — Totals</h3>
+        <h3>Normal Venting â Totals</h3>
         <table class="result-table">
           ${tableRow('Total Normal Inbreathing', fmtVal(nv.totals.total_inbreathing, fu), true)}
           ${tableRow('Total Normal Outbreathing', fmtVal(nv.totals.total_outbreathing, fu), true)}
@@ -729,13 +729,13 @@ function renderResults(result) {
     if (evRows) {
       html += `
         <div class="result-section">
-          <h3>Emergency Venting — Fire Case</h3>
+          <h3>Emergency Venting â Fire Case</h3>
           <table class="result-table">${evRows}</table>
         </div>`;
     }
   }
 
-  // ── Phase 5.3: Installed Device Breakdown ──────────────────────────────
+  // ââ Phase 5.3: Installed Device Breakdown ââââââââââââââââââââââââââââââ
   if (o.actual_venting && o.actual_venting.devices && o.actual_venting.devices.length > 0) {
     const devs = o.actual_venting.devices;
     const typeLabels = { PVRV: 'PVRV', EPRV: 'EPRV', FREE_VENT: 'Free Vent' };
@@ -763,8 +763,8 @@ function renderResults(result) {
                 <td>${i + 1}</td>
                 <td><span class="type-badge ${tCls}">${escapeHtml(tLabel)}</span></td>
                 <td>${escapeHtml(dirLabel)}</td>
-                <td class="mono-val">${d.flow_out != null && d.flow_out > 0 ? fmtVal(d.flow_out, fu) : '—'}</td>
-                <td class="mono-val">${d.flow_in != null && d.flow_in > 0 ? fmtVal(d.flow_in, fu) : '—'}</td>
+                <td class="mono-val">${d.flow_out != null && d.flow_out > 0 ? fmtVal(d.flow_out, fu) : 'â'}</td>
+                <td class="mono-val">${d.flow_in != null && d.flow_in > 0 ? fmtVal(d.flow_in, fu) : 'â'}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -784,4 +784,48 @@ function renderResults(result) {
     const im = result.intermediates;
     html += `
       <div class="result-section">
-        <div class="collapsibl
+        <div class="collapsible-toggle" data-collapsible>
+          <h3 style="margin:0;">Intermediates (SI Audit Trail)</h3>
+          <span class="arrow">&#9654;</span>
+        </div>
+        <div class="collapsible-body">
+          <table class="result-table">
+            ${tableRow('Volume', fmtVal(im.volume_m3, 'mÂ³'))}
+            ${tableRow('MAWP', fmtVal(im.mawp_kpa, 'kPa(g)'))}
+            ${tableRow('MAWV', fmtVal(im.mawv_kpa, 'kPa(g)'))}
+            ${tableRow('Allowable Overpressure', fmtVal(im.allowable_overpressure_pct, '%'))}
+            ${tableRow('Fill Rate', fmtVal(im.fill_rate_m3hr, 'mÂ³/hr'))}
+            ${tableRow('Empty Rate', fmtVal(im.empty_rate_m3hr, 'mÂ³/hr'))}
+            ${tableRow('Vapor Pressure', fmtVal(im.vapor_pressure_kpa, 'kPa(a)'))}
+            ${tableRow('Latent Heat', fmtVal(im.latent_heat_J_kg, 'J/kg'))}
+            ${tableRow('Relieving Pressure', fmtVal(im.relieving_pressure_kpa_a, 'kPa(a)'))}
+            ${tableRow('Relieving Temperature', fmtVal(im.relieving_temp_C, 'Â°C'))}
+            ${tableRow('Thermal Bare Inbreathing', fmtVal(im.thermal_bare_in_Nm3hr, 'NmÂ³/hr'))}
+            ${tableRow('Thermal Bare Outbreathing', fmtVal(im.thermal_bare_out_Nm3hr, 'NmÂ³/hr'))}
+            ${tableRow('Insulation Factor', fmtVal(im.insulation_factor))}
+            ${im.wetted_area_m2 != null ? tableRow('Wetted Area', fmtVal(im.wetted_area_m2, 'mÂ²')) : ''}
+            ${im.heat_input_W != null ? tableRow('Heat Input', fmtVal(im.heat_input_W, 'W')) : ''}
+          </table>
+        </div>
+      </div>`;
+  }
+
+  resultsContainer.innerHTML = html;
+
+  // ââ Wire up collapsible toggles ââââââââââââââââââââââââââââââââââââââââââ
+  resultsContainer.querySelectorAll('[data-collapsible]').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+      toggle.classList.toggle('open');
+      toggle.nextElementSibling.classList.toggle('open');
+    });
+  });
+}
+
+// ââ Form submission ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const payload = assemblePayload();
+  const result = window.API2000.runCalculation(payload);
+  renderResults(result);
+});
