@@ -220,8 +220,8 @@
           if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
             const pipe_d_m = d.pipe_diameter != null ? uc.pipeDiamToM(d.pipe_diameter, us) : null;
             const Cd       = d.discharge_coefficient ?? window.API2000.OPEN_VENT.DEFAULT_CD;
-            const k_fluid  = d.specific_heat_ratio ?? null;
-            const Zi_fluid = d.compressibility_factor ?? 1.0;
+            const k_fluid  = d.specific_heat_ratio ?? fluid.specific_heat_ratio ?? null;
+            const Zi_fluid = d.compressibility_factor ?? fluid.compressibility_factor ?? 1.0;
             const M_fluid  = fluid.molecular_weight ?? null;
 
             dev.pipe_diameter_m = pipe_d_m;
@@ -361,5 +361,3 @@
         mawp_kpa:                 round(mawp_kpa, 3),
         mawv_kpa:                 round(mawv_kpa, 3),
         allowable_overpressure_pct: overpressure_pct,
-        fill_rate_m3hr:           round(fill_m3hr, 4),
-        e
