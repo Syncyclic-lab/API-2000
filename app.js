@@ -473,6 +473,10 @@ function assemblePayload() {
   if (flash != null)                   fluid.flash_point = flash;
   const sg = num('specificGravity');
   if (sg != null)                      fluid.specific_gravity = sg;
+  const kVal = num('fluidK');
+  if (kVal != null)                    fluid.specific_heat_ratio = kVal;
+  const ziVal = num('fluidZi');
+  if (ziVal != null)                   fluid.compressibility_factor = ziVal;
 
   // Environment
   const environment = {
@@ -780,9 +784,4 @@ function renderResults(result) {
     const im = result.intermediates;
     html += `
       <div class="result-section">
-        <div class="collapsible-toggle" data-collapsible>
-          <h3 style="margin:0;">Intermediates (SI Audit Trail)</h3>
-          <span class="arrow">▶</span>
-        </div>
-        <div class="collapsible-body">
-          <table class="resul
+        <div class="collapsibl
