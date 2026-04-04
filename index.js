@@ -1,5 +1,5 @@
 // ============================================================
-// index.js  (browser build — orchestrator)
+// index.js  (browser build - orchestrator)
 // Accepts a validated input object, runs all API 2000
 // calculations, and returns a structured result object.
 // Depends on: constants.js, unitConverter.js, api2000Engine.js
@@ -12,20 +12,19 @@
   const engine   = window.API2000.engine;
   const PHYSICAL = window.API2000.PHYSICAL;
 
-  // ─── HELPERS ─────────────────────────────────────────────────────────────────
+  // --- HELPERS ---
 
   const round = (v, n = 2) => (v == null ? null : Math.round(v * 10 ** n) / 10 ** n);
-  const flowLabel = (unitSystem) => unitSystem === 'US' ? 'SCFH' : 'Nm³/hr';
-  const areaLabel = (unitSystem) => unitSystem === 'US' ? 'ft²'  : 'm²';
+  const flowLabel = (unitSystem) => unitSystem === 'US' ? 'SCFH' : 'Nm3/hr';
+  const areaLabel = (unitSystem) => unitSystem === 'US' ? 'ft2'  : 'm2';
   const heatLabel = (unitSystem) => unitSystem === 'US' ? 'BTU/hr' : 'W';
 
-  // ─── MAIN ORCHESTRATOR ───────────────────────────────────────────────────────
+  // --- MAIN ORCHESTRATOR ---
 
   function runCalculation(inputs) {
     const errors = [];
     const us     = inputs.meta.unit_system;
 
-    // ── Guard: disclaimer must be accepted ──────────────────────────────────
     if (!inputs.meta.disclaimer_accepted) {
       return {
         errors: ['Calculation cannot proceed until the engineering disclaimer is accepted.'],
@@ -34,10 +33,7 @@
     }
 
     try {
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 1  Convert all inputs to SI
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 1 Convert all inputs to SI
       const tank  = inputs.tank;
       const fluid = inputs.fluid;
       const env   = inputs.environment;
@@ -62,7 +58,6 @@
         ? uc.toC(fluid.relieving_vapor_temp, us)
         : temp_contents_C;
 
-      // Relieving pressure absolute: MAWP × (1 + overpressure%) + atm
       const overpressure_pct = opts.allowable_overpressure_pct ?? 0;
       const mawp_relieving_kpa = mawp_kpa * (1 + overpressure_pct / 100);
       const relieving_P_kpa = uc.gaugeToAbsKpa(mawp_relieving_kpa);
@@ -105,36 +100,22 @@
         elevation_above_grade: elev_m,
       };
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 2  Thermal Venting
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 2 Thermal Venting
       const bare_thermal = engine.calcThermalVentingBare(volume_m3, env.latitude_zone);
       const thermal      = engine.applyInsulationFactor(bare_thermal, env_si);
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 3  Operational Venting
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 3 Operational Venting
       const operational_in = engine.calcOperationalInbreathing(empty_m3hr);
       const { operational_out, vaporisation_component } =
         engine.calcOperationalOutbreathing(fill_m3hr, fluid.is_volatile);
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 4  Total Normal Venting
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 4 Total Normal Venting
       const totals = engine.calcTotalNormalVenting(
-        thermal.thermal_in,
-        operational_in,
-        thermal.thermal_out,
-        operational_out,
+        thermal.thermal_in, operational_in,
+        thermal.thermal_out, operational_out,
       );
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 5  Emergency Venting (Fire Case)
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 5 Emergency Venting (Fire Case)
       let wetted_result     = null;
       let heat_input_result = null;
       let emergency_result  = null;
@@ -180,20 +161,14 @@
         }
       }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 6  Governing Requirements
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 6 Governing Requirements
       const governing = engine.calcGoverning(
         totals.total_out,
         emergency_result?.emergency_out_Nm3hr ?? null,
         totals.total_in,
       );
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 6.5 Actual Venting Devices (Phase 4)
-      // ══════════════════════════════════════════════════════════════════════
-      
+      // STEP 6.5 Actual Venting Devices
       let actual_venting_result = null;
       
       if (inputs.devices && inputs.devices.length > 0) {
@@ -216,7 +191,6 @@
             rated_flow_inbreathing:  flowToSI(d.rated_flow_inbreathing),
           };
 
-          // Pre-process: calculate capacity for FREE_VENT with pipe geometry
           if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
             const pipe_d_m = d.pipe_diameter != null ? uc.pipeDiamToM(d.pipe_diameter, us) : null;
             const Cd       = d.discharge_coefficient ?? window.API2000.OPEN_VENT.DEFAULT_CD;
@@ -229,7 +203,6 @@
             dev.specific_heat_ratio = k_fluid;
             dev.compressibility_factor = Zi_fluid;
 
-            // Outbreathing: tank pressure → atmosphere (fluid properties)
             if (d.direction === 'BOTH' || d.direction === 'OUTBREATHING') {
               if (pipe_d_m && k_fluid && M_fluid) {
                 dev.rated_flow_outbreathing = engine.calculateOpenVentCapacity(
@@ -241,7 +214,6 @@
               }
             }
 
-            // Inbreathing: atmosphere → tank vacuum (air properties)
             if (d.direction === 'BOTH' || d.direction === 'INBREATHING') {
               if (pipe_d_m) {
                 const vacuum_abs_kpa = PHYSICAL.P_ATM_KPA - relieving_vacuum_kpa;
@@ -265,10 +237,7 @@
         );
       }
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 7  Warnings
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 7 Warnings
       const enriched_inputs = {
         ...inputs,
         tank:  { ...tank,  volume_m3, mawp_kpa, mawv_kpa },
@@ -279,10 +248,7 @@
       };
       const warnings = engine.generateWarnings(enriched_inputs, { wetted: wetted_result });
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 8  Convert outputs to user's unit system
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 8 Convert outputs to user unit system
       const toFlow = (nm3hr) => nm3hr != null ? uc.ventingFlowToOutput(nm3hr, us) : null;
       const toArea = (m2)    => m2    != null ? uc.areaToOutput(m2, us)           : null;
       const toHeat = (w)     => w     != null ? uc.heatToOutput(w, us)            : null;
@@ -352,12 +318,41 @@
         } : null
       };
 
-      // ══════════════════════════════════════════════════════════════════════
-      // STEP 9  Intermediates (SI, for audit trail)
-      // ══════════════════════════════════════════════════════════════════════
-
+      // STEP 9 Intermediates (SI, for audit trail)
       const intermediates = {
         volume_m3:                round(volume_m3, 3),
         mawp_kpa:                 round(mawp_kpa, 3),
         mawv_kpa:                 round(mawv_kpa, 3),
         allowable_overpressure_pct: overpressure_pct,
+        fill_rate_m3hr:           round(fill_m3hr, 4),
+        empty_rate_m3hr:          round(empty_m3hr, 4),
+        vapor_pressure_kpa:       round(vp_kpa, 3),
+        latent_heat_J_kg:         latent_J_kg ? round(latent_J_kg, 0) : null,
+        relieving_pressure_kpa_a: round(relieving_P_kpa, 3),
+        relieving_temp_C:         round(relieving_temp_C, 1),
+        thermal_bare_in_Nm3hr:    round(bare_thermal.thermal_in, 2),
+        thermal_bare_out_Nm3hr:   round(bare_thermal.thermal_out, 2),
+        insulation_factor:        round(thermal.insulation_factor, 4),
+        wetted_area_m2:           wetted_result ? round(wetted_result.wetted_area_m2, 2) : null,
+        heat_input_W:             heat_input_result ? round(heat_input_result.heat_input_W, 0) : null,
+      };
+
+      return {
+        outputs,
+        intermediates,
+        warnings,
+        errors,
+      };
+
+    } catch (err) {
+      return {
+        errors: [err.message || String(err)],
+        warnings: [],
+      };
+    }
+  }
+
+  // --- EXPORT ---
+
+  window.API2000.runCalculation = runCalculation;
+})();
