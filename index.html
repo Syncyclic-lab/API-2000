@@ -590,6 +590,143 @@
       cursor: pointer;
       margin: 0;
     }
+
+    /* ── Flame arrestor sub-block ─────────────── */
+    .arrestor-block {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border: 1px dashed var(--gray-300);
+      border-radius: 6px;
+      background: #fff;
+    }
+    .arrestor-block .arrestor-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--navy);
+      cursor: pointer;
+      user-select: none;
+    }
+    .arrestor-block .arrestor-toggle input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: var(--blue);
+      cursor: pointer;
+    }
+    .arrestor-block .arrestor-body {
+      display: none;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--gray-200);
+    }
+    .arrestor-block.enabled .arrestor-body { display: block; }
+
+    .arrestor-note {
+      font-size: 0.78rem;
+      color: var(--gray-700);
+      background: #fef3e6;
+      border: 1px solid #f5d3a0;
+      border-radius: 4px;
+      padding: 6px 10px;
+      margin-bottom: 10px;
+      line-height: 1.45;
+    }
+
+    .arrestor-ref-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      margin-bottom: 12px;
+    }
+    .arrestor-ref-table th, .arrestor-ref-table td {
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--gray-100);
+      text-align: left;
+    }
+    .arrestor-ref-table th {
+      font-size: 0.7rem;
+      color: var(--gray-600);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: var(--gray-50);
+    }
+    .arrestor-ref-table td.k-range {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--gray-700);
+      white-space: nowrap;
+    }
+    .btn-use-default {
+      padding: 3px 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--blue);
+      background: var(--blue-light);
+      border: 1px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn-use-default:hover { background: #d2e3fc; }
+
+    .diam-unit-toggle {
+      display: inline-flex;
+      border: 1px solid var(--gray-300);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-left: 6px;
+    }
+    .diam-unit-toggle button {
+      padding: 2px 8px;
+      font-size: 0.72rem;
+      font-family: var(--mono);
+      background: #fff;
+      color: var(--gray-700);
+      border: none;
+      cursor: pointer;
+    }
+    .diam-unit-toggle button.active {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    /* Badges for arrestor results */
+    .fa-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .fa-badge.pass { background: var(--green-bg); color: var(--green); border: 1px solid #a8dab5; }
+    .fa-badge.warn { background: var(--orange-bg); color: #9a5a05; border: 1px solid #f5d3a0; }
+    .fa-badge.fail { background: var(--red-bg); color: var(--red); border: 1px solid #f5b7b5; }
+
+    .arrestor-results-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    .arrestor-results-table th {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--gray-400);
+      padding: 6px 10px;
+      text-align: left;
+      border-bottom: 2px solid var(--gray-200);
+    }
+    .arrestor-results-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--gray-100);
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--gray-900);
+    }
+    .arrestor-results-table td:first-child { font-family: var(--font); color: var(--gray-700); }
   </style>
 </head>
 <body>
@@ -682,10 +819,6 @@
               <label for="tankElevation">Elevation Above Grade <span class="unit dim-unit">m</span></label>
               <input type="number" id="tankElevation" step="any" min="0" value="0">
             </div>
-            <div class="field">
-              <label for="coneRoofAngle">Cone Roof Angle <span class="unit">°</span></label>
-              <input type="number" id="coneRoofAngle" step="any" min="0" max="45" placeholder="0–45 (if applicable)">
-            </div>
           </div>
 
           <!-- ══ FLUID ══ -->
@@ -731,14 +864,6 @@
               <input type="number" id="relievingTemp" step="any">
               <div class="hint">Bubble point temperature</div>
             </div>
-            <div class="field">
-              <label for="flashPoint">Flash Point <span class="unit temp-unit">°C</span></label>
-              <input type="number" id="flashPoint" step="any">
-            </div>
-            <div class="field">
-              <label for="specificGravity">Specific Gravity</label>
-              <input type="number" id="specificGravity" step="any" min="0" value="1.0">
-            </div>
             <div class="field" id="fluidKField" style="display:none;">
               <label for="fluidK">Ratio of Specific Heats (<i>k</i>)</label>
               <input type="number" id="fluidK" step="0.01" min="1" max="2" placeholder="e.g. 1.4">
@@ -781,10 +906,6 @@
                 <input type="number" id="insulThickness" step="any" min="0">
               </div>
               <div class="field">
-                <label for="insulSurfArea">Insulated Surface Area <span class="unit area-unit">m²</span></label>
-                <input type="number" id="insulSurfArea" step="any" min="0">
-              </div>
-              <div class="field">
                 <label for="insulConductivity">Thermal Conductivity <span class="unit insul-k-unit">W/(m·K)</span></label>
                 <input type="number" id="insulConductivity" step="any" min="0">
               </div>
@@ -819,7 +940,6 @@
           <div class="section-title">Calculation Options</div>
           <div class="check-list">
             <label class="check-item"><input type="checkbox" id="opt_fireCaseEnabled" checked><span>Include emergency fire case (§7)</span></label>
-            <label class="check-item"><input type="checkbox" id="opt_simplifiedTable" checked><span>Use simplified fire table lookup (Table 4)</span></label>
             <label class="check-item"><input type="checkbox" id="opt_drainage"><span>Credit for drainage (§7.3.3)</span></label>
             <label class="check-item"><input type="checkbox" id="opt_fireproofing"><span>Credit for fireproofing (§7.3.3)</span></label>
           </div>
@@ -884,6 +1004,7 @@
   <script defer src="constants.js"></script>
   <script defer src="unitConverter.js"></script>
   <script defer src="api2000Engine.js"></script>
+  <script defer src="flameArrestor.js"></script>
   <script defer src="index.js"></script>
   <script defer src="app.js"></script>
 
