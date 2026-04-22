@@ -1,86 +1,97 @@
 // ============================================================
-// public/app.js  â  API 2000 Venting Calculator Frontend
-// Gathers form inputs, assembles the JSON payload per
-// input.schema.json, calls the backend, and renders
-// formatted results.
+// app.js — API 2000 Venting Calculator frontend
+// Gathers form inputs, assembles the calculation payload,
+// runs the in-browser engine, and renders formatted results.
 // ============================================================
 
 'use strict';
 
-// ââ Unit label maps (keyed by unit system) âââââââââââââââââââââââââââââââââââ
+// --- Unit label maps (keyed by unit system) ---------------------------------
 
 const UNITS = {
   SI: {
-    vol: 'mÂ³', dim: 'm', press: 'kPa(g)', temp: 'Â°C',
-    vp: 'kPa(a)', fill: 'mÂ³/hr', heat: 'J/kg',
-    insulThick: 'mm', insulK: 'W/(mÂ·K)', insulH: 'W/(mÂ²Â·K)',
-    area: 'mÂ²', flow: 'NmÂ³/hr', heatRate: 'W',
+    vol: 'm³', dim: 'm', press: 'kPa(g)', temp: '°C',
+    vp: 'kPa(a)', fill: 'm³/hr', heat: 'J/kg',
+    insulThick: 'mm', insulK: 'W/(m·K)', insulH: 'W/(m²·K)',
+    area: 'm²', flow: 'Nm³/hr', heatRate: 'W',
     pipeDiam: 'mm',
   },
   US: {
-    vol: 'BBL', dim: 'ft', press: 'psi(g)', temp: 'Â°F',
+    vol: 'BBL', dim: 'ft', press: 'psi(g)', temp: '°F',
     vp: 'psia', fill: 'BPH', heat: 'BTU/lb',
-    insulThick: 'in', insulK: 'BTUÂ·in/(hrÂ·ftÂ²Â·Â°F)', insulH: 'BTU/(hrÂ·ftÂ²Â·Â°F)',
-    area: 'ftÂ²', flow: 'SCFH', heatRate: 'BTU/hr',
+    insulThick: 'in', insulK: 'BTU·in/(hr·ft²·°F)', insulH: 'BTU/(hr·ft²·°F)',
+    area: 'ft²', flow: 'SCFH', heatRate: 'BTU/hr',
     pipeDiam: 'in',
   },
 };
 
-// Map of CSS class â UNITS key for dynamic label swapping
 const UNIT_CLASS_MAP = {
-  'vol-unit':        'vol',
-  'dim-unit':        'dim',
-  'press-unit':      'press',
-  'temp-unit':       'temp',
-  'vp-unit':         'vp',
-  'fill-unit':       'fill',
-  'heat-unit':       'heat',
-  'insul-thick-unit':'insulThick',
-  'insul-k-unit':    'insulK',
-  'insul-h-unit':    'insulH',
-  'area-unit':       'area',
-  'flow-unit':       'flow',
-  'pipe-diam-unit':  'pipeDiam',
+  'vol-unit':         'vol',
+  'dim-unit':         'dim',
+  'press-unit':       'press',
+  'temp-unit':        'temp',
+  'vp-unit':          'vp',
+  'fill-unit':        'fill',
+  'heat-unit':        'heat',
+  'insul-thick-unit': 'insulThick',
+  'insul-k-unit':     'insulK',
+  'insul-h-unit':     'insulH',
+  'area-unit':        'area',
+  'flow-unit':        'flow',
+  'pipe-diam-unit':   'pipeDiam',
 };
 
-// ââ DOM References âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// --- DOM references ---------------------------------------------------------
 
-const $  = (id) => document.getElementById(id);
-const form              = $('calcForm');
-const disclaimerCheck   = $('disclaimerCheck');
-const calcBtn           = $('calcBtn');
-const resultsContainer  = $('resultsContainer');
-const insulationType    = $('insulationType');
-const insulationFields  = $('insulationFields');
-const coverageField     = $('coverageFractionField');
-const unitSystemSelect  = $('unitSystem');
+const $ = (id) => document.getElementById(id);
+const form             = $('calcForm');
+const disclaimerCheck  = $('disclaimerCheck');
+const calcBtn          = $('calcBtn');
+const resultsContainer = $('resultsContainer');
+const insulationType   = $('insulationType');
+const insulationFields = $('insulationFields');
+const coverageField    = $('coverageFractionField');
+const unitSystemSelect = $('unitSystem');
 
-// ââ Tab Switching ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// --- Tab switching ----------------------------------------------------------
 
 document.querySelectorAll('.tab-button').forEach(btn => {
   btn.addEventListener('click', () => {
-    // Deactivate all tab buttons
     document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
-    // Deactivate all tab content panes
     document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
-    // Activate clicked button and its target pane
     btn.classList.add('active');
     const target = document.getElementById(btn.dataset.tab);
     if (target) target.classList.add('active');
   });
 });
 
-// ââ Actual Venting Device Management âââââââââââââââââââââââââââââââââââââââââ
+// --- Actual venting device management ---------------------------------------
 
 const btnAddDevice = $('btnAddDevice');
 const deviceRoster = $('deviceRoster');
 let deviceIdCounter = 0;
 
-/**
- * renderDeviceRow()  â  Phase 2 (Step 2.3)
- * Injects a new device card into the DOM with all required fields.
- * Fields conditionally show/hide based on the selected relief direction.
- */
+// DEFAULT_K contents are developer-controlled static data from constants.js,
+// so direct string interpolation (without runtime escape) is safe here.
+function buildArrestorRefRows() {
+  const defK = (window.API2000.FLAME_ARRESTOR && window.API2000.FLAME_ARRESTOR.DEFAULT_K) || {};
+  return Object.entries(defK).map(([key, row]) => `
+    <tr>
+      <td>${row.label}</td>
+      <td class="k-range">${row.k_low}&nbsp;–&nbsp;${row.k_high}</td>
+      <td class="k-range">${row.k_default}</td>
+      <td><button type="button" class="btn-use-default" data-fa-use-default="${key}">Use default</button></td>
+    </tr>
+  `).join('');
+}
+
+function buildArrestorClassOptions() {
+  const defK = (window.API2000.FLAME_ARRESTOR && window.API2000.FLAME_ARRESTOR.DEFAULT_K) || {};
+  return Object.entries(defK).map(([key, row]) =>
+    `<option value="${key}">${row.label} (K ${row.k_low}–${row.k_high})</option>`
+  ).join('');
+}
+
 function renderDeviceRow() {
   deviceIdCounter++;
   const id = deviceIdCounter;
@@ -150,7 +161,57 @@ function renderDeviceRow() {
       <div class="field dev-field-cd" style="display:none;">
         <label>Coefficient of Discharge (C<sub>d</sub>)</label>
         <input type="number" step="0.01" min="0" max="1" class="dev-cd" data-field="discharge_coefficient" value="0.5">
-        <div class="hint">Typical range: 0.3â0.8 for pipe fittings</div>
+        <div class="hint">Typical range: 0.3–0.8 for pipe fittings</div>
+      </div>
+    </div>
+
+    <!-- ── Flame arrestor sub-block (optional, default off) ─────────── -->
+    <div class="arrestor-block" data-fa-block>
+      <label class="arrestor-toggle">
+        <input type="checkbox" class="fa-enabled" data-field="flame_arrestor_enabled">
+        <span>This device has a flame arrestor (ISO 16852)</span>
+      </label>
+      <div class="arrestor-body">
+        <div class="arrestor-note">
+          Reference K-values are generic approximations. For regulatory sizing,
+          use the manufacturer's certified ΔP-vs-Q capacity curve (ISO 16852).
+        </div>
+        <table class="arrestor-ref-table" aria-label="Reference K-values">
+          <thead>
+            <tr>
+              <th>Arrestor class</th>
+              <th>Typical K</th>
+              <th>Default</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${buildArrestorRefRows()}</tbody>
+        </table>
+        <div class="field-grid">
+          <div class="field">
+            <label>Arrestor Class</label>
+            <select class="fa-class" data-field="arrestor_class_key">
+              ${buildArrestorClassOptions()}
+            </select>
+            <div class="hint">Selecting a class pre-fills K (editable).</div>
+          </div>
+          <div class="field">
+            <label>Resistance Coefficient (K) <span class="unit">dimensionless</span></label>
+            <input type="number" class="fa-k" data-field="fa_K" step="0.1" min="0.1" value="5.0">
+            <div class="hint">Override with manufacturer value if available.</div>
+          </div>
+          <div class="field">
+            <label>Nominal Inside Diameter
+              <span class="diam-unit-toggle" data-fa-diam-toggle>
+                <button type="button" data-fa-diam-unit="mm" class="active">mm</button>
+                <button type="button" data-fa-diam-unit="in">in</button>
+                <button type="button" data-fa-diam-unit="m">m</button>
+              </span>
+            </label>
+            <input type="number" class="fa-diameter" data-field="fa_diameter" step="any" min="0" value="101.6">
+            <div class="hint">Default 4" (101.6 mm). Set to the arrestor's nominal ID.</div>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -158,17 +219,35 @@ function renderDeviceRow() {
   deviceRoster.appendChild(card);
   applyTypeVisibility(card);
   updateUnitLabels(card);
+  applyArrestorVisibility(card);
   renumberDeviceCards();
 }
 
-/**
- * applyDirectionVisibility()
- * Shows or hides set-pressure, set-vacuum, and flow fields based on the
- * currently selected relief direction for a given device card.
- */
+// --- Flame-arrestor helpers -------------------------------------------------
+
+function applyArrestorVisibility(card) {
+  const block   = card.querySelector('[data-fa-block]');
+  if (!block) return;
+  const enabled = card.querySelector('.fa-enabled').checked;
+  block.classList.toggle('enabled', enabled);
+}
+
+// Convert the user's entered diameter to metres based on the active unit toggle
+function getArrestorDiameterMetres(card) {
+  const input = card.querySelector('.fa-diameter');
+  const v     = parseFloat(input.value);
+  if (isNaN(v) || v <= 0) return null;
+  const activeBtn = card.querySelector('[data-fa-diam-toggle] button.active');
+  const unit      = activeBtn ? activeBtn.dataset.faDiamUnit : 'mm';
+  const C         = window.API2000.CONVERSIONS;
+  if (unit === 'in') return v * C.IN_TO_M;
+  if (unit === 'm')  return v;
+  return v * C.MM_TO_M; // default mm
+}
+
 function applyDirectionVisibility(card) {
-  const dir  = card.querySelector('.dev-direction').value;
-  const type = card.querySelector('.dev-type').value;
+  const dir    = card.querySelector('.dev-direction').value;
+  const type   = card.querySelector('.dev-type').value;
   const capSrc = card.querySelector('.dev-cap-src:checked')?.value || 'manufacturer';
   const isCalcFreeVent = type === 'FREE_VENT' && capSrc === 'calculated';
 
@@ -178,31 +257,23 @@ function applyDirectionVisibility(card) {
   // Free vents have no set pressure / set vacuum / overpressure
   const showSetP = showPressure && type !== 'FREE_VENT';
   const showSetV = showVacuum   && type !== 'FREE_VENT';
-  card.querySelector('.dev-field-sp').style.display       = showSetP ? '' : 'none';
-  card.querySelector('.dev-field-sv').style.display       = showSetV ? '' : 'none';
+  card.querySelector('.dev-field-sp').style.display           = showSetP ? '' : 'none';
+  card.querySelector('.dev-field-sv').style.display           = showSetV ? '' : 'none';
   card.querySelector('.dev-field-overpressure').style.display = showSetP ? '' : 'none';
 
-  // Rated flow fields: only for manufacturer-rated devices
   card.querySelector('.dev-field-flow-out').style.display = (showPressure && !isCalcFreeVent) ? '' : 'none';
-  card.querySelector('.dev-field-flow-in').style.display  = (showVacuum && !isCalcFreeVent)   ? '' : 'none';
+  card.querySelector('.dev-field-flow-in').style.display  = (showVacuum   && !isCalcFreeVent) ? '' : 'none';
 
-  // Pipe geometry fields: only for calculated free vents
   card.querySelector('.dev-field-pipe-diam').style.display = isCalcFreeVent ? '' : 'none';
   card.querySelector('.dev-field-cd').style.display        = isCalcFreeVent ? '' : 'none';
 }
 
-/**
- * applyTypeVisibility()
- * Shows or hides type-specific fields (capacity source radio) when device
- * type changes, and re-runs direction visibility to update dependent fields.
- */
 function applyTypeVisibility(card) {
   const type = card.querySelector('.dev-type').value;
   const isFreeVent = type === 'FREE_VENT';
 
   card.querySelector('.dev-field-capacity-source').style.display = isFreeVent ? '' : 'none';
 
-  // Reset to manufacturer if switching away from FREE_VENT
   if (!isFreeVent) {
     const mfgRadio = card.querySelector('.dev-cap-src[value="manufacturer"]');
     if (mfgRadio) mfgRadio.checked = true;
@@ -212,11 +283,6 @@ function applyTypeVisibility(card) {
   updateFluidFieldsVisibility();
 }
 
-/**
- * renumberDeviceCards()
- * Re-labels the visible device cards sequentially (Device #1, #2, â¦)
- * after any addition or removal so numbering stays tidy.
- */
 function renumberDeviceCards() {
   const cards = deviceRoster.querySelectorAll('.device-card');
   cards.forEach((card, idx) => {
@@ -224,20 +290,13 @@ function renumberDeviceCards() {
   });
 }
 
-/**
- * collectDeviceData()  â  Phase 2 (Step 2.3)
- * Scrapes every device card in the DOM and returns a clean array of
- * device objects suitable for the calculation payload.
- */
 function collectDeviceData() {
   const devices = [];
   deviceRoster.querySelectorAll('.device-card').forEach(card => {
     const dir  = card.querySelector('.dev-direction').value;
     const type = card.querySelector('.dev-type').value;
-
     const device = { type, direction: dir };
 
-    // Capacity source for FREE_VENT
     if (type === 'FREE_VENT') {
       const capSrc = card.querySelector('.dev-cap-src:checked')?.value || 'manufacturer';
       device.capacity_source = capSrc;
@@ -249,7 +308,6 @@ function collectDeviceData() {
         const cd = parseFloat(card.querySelector('.dev-cd').value);
         if (!isNaN(cd)) device.discharge_coefficient = cd;
 
-        // Pull k and Zi from fluid section
         const kVal = num('fluidK');
         if (kVal != null) device.specific_heat_ratio = kVal;
         const ziVal = num('fluidZi');
@@ -257,7 +315,6 @@ function collectDeviceData() {
       }
     }
 
-    // Only collect fields that are relevant to the selected direction
     const isCalcFreeVent = type === 'FREE_VENT' && device.capacity_source === 'calculated';
 
     if ((dir === 'BOTH' || dir === 'OUTBREATHING') && !isCalcFreeVent) {
@@ -279,16 +336,26 @@ function collectDeviceData() {
       if (!isNaN(flowIn)) device.rated_flow_inbreathing = flowIn;
     }
 
+    // Flame arrestor — always emitted in SI (metres, dimensionless K).
+    const faCheckbox = card.querySelector('.fa-enabled');
+    if (faCheckbox && faCheckbox.checked) {
+      const K = parseFloat(card.querySelector('.fa-k').value);
+      const D = getArrestorDiameterMetres(card);
+      if (!isNaN(K) && K > 0 && D && D > 0) {
+        device.flame_arrestor = {
+          type: 'FLAME_ARRESTOR',
+          K,
+          diameter_m: D,
+          arrestor_class_key: card.querySelector('.fa-class').value,
+        };
+      }
+    }
+
     devices.push(device);
   });
   return devices;
 }
 
-/**
- * updateFluidFieldsVisibility()
- * Shows the k and Zi fluid fields only when at least one device uses
- * calculated pipe-geometry capacity, to avoid confusing users otherwise.
- */
 function updateFluidFieldsVisibility() {
   const hasCalcFreeVent = Array.from(deviceRoster.querySelectorAll('.device-card')).some(card => {
     const type = card.querySelector('.dev-type').value;
@@ -301,7 +368,6 @@ function updateFluidFieldsVisibility() {
   if (ziField) ziField.style.display = hasCalcFreeVent ? '' : 'none';
 }
 
-// Event delegation for device roster: remove cards, direction & type changes
 deviceRoster.addEventListener('click', (e) => {
   const removeBtn = e.target.closest('[data-remove-device]');
   if (removeBtn) {
@@ -312,6 +378,30 @@ deviceRoster.addEventListener('click', (e) => {
       renumberDeviceCards();
       updateFluidFieldsVisibility();
     }
+    return;
+  }
+
+  // "Use default" in the reference table pre-fills the K input and selects
+  // the matching class in the dropdown.
+  const useDefaultBtn = e.target.closest('[data-fa-use-default]');
+  if (useDefaultBtn) {
+    const card = useDefaultBtn.closest('.device-card');
+    const key  = useDefaultBtn.dataset.faUseDefault;
+    const row  = window.API2000.FLAME_ARRESTOR?.DEFAULT_K?.[key];
+    if (card && row) {
+      card.querySelector('.fa-k').value = row.k_default;
+      const sel = card.querySelector('.fa-class');
+      if (sel) sel.value = key;
+    }
+    return;
+  }
+
+  // Diameter unit-toggle pill buttons.
+  const diamBtn = e.target.closest('[data-fa-diam-unit]');
+  if (diamBtn) {
+    const group = diamBtn.closest('[data-fa-diam-toggle]');
+    if (group) group.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === diamBtn));
+    return;
   }
 });
 
@@ -329,19 +419,25 @@ deviceRoster.addEventListener('change', (e) => {
     applyDirectionVisibility(card);
     updateFluidFieldsVisibility();
   }
+  if (e.target.classList.contains('fa-enabled')) {
+    applyArrestorVisibility(card);
+  }
+  // Selecting a class pre-fills K with that class's default (still editable).
+  if (e.target.classList.contains('fa-class')) {
+    const key = e.target.value;
+    const row = window.API2000.FLAME_ARRESTOR?.DEFAULT_K?.[key];
+    if (row) card.querySelector('.fa-k').value = row.k_default;
+  }
 });
 
 btnAddDevice.addEventListener('click', renderDeviceRow);
-
-// Add one device by default to prompt the user
 renderDeviceRow();
 
-// ââ Unit label updater âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// --- Unit label updater -----------------------------------------------------
 
 function updateUnitLabels(scope) {
   const root = scope || document;
-  const us = unitSystemSelect.value;
-  const units = UNITS[us];
+  const units = UNITS[unitSystemSelect.value];
   for (const [cls, key] of Object.entries(UNIT_CLASS_MAP)) {
     root.querySelectorAll(`.${cls}`).forEach(el => {
       el.textContent = units[key];
@@ -350,15 +446,15 @@ function updateUnitLabels(scope) {
 }
 
 unitSystemSelect.addEventListener('change', () => updateUnitLabels());
-updateUnitLabels(); // initial run
+updateUnitLabels();
 
-// ââ Disclaimer toggle ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// --- Disclaimer toggle ------------------------------------------------------
 
 disclaimerCheck.addEventListener('change', () => {
   calcBtn.disabled = !disclaimerCheck.checked;
 });
 
-// ââ Insulation visibility toggle âââââââââââââââââââââââââââââââââââââââââââââ
+// --- Insulation visibility toggle -------------------------------------------
 
 insulationType.addEventListener('change', () => {
   const show = insulationType.value !== 'UNINSULATED';
@@ -367,7 +463,7 @@ insulationType.addEventListener('change', () => {
     insulationType.value === 'PARTIALLY_INSULATED' ? '' : 'none';
 });
 
-// ââ Auto-determine volatility from vapor pressure ââââââââââââââââââââââââââââ
+// --- Auto-determine volatility from vapor pressure --------------------------
 
 const volatilityIndicator = $('volatilityIndicator');
 const vaporPressureInput  = $('vaporPressure');
@@ -388,44 +484,48 @@ function updateVolatilityIndicator() {
     volatilityIndicator.textContent = `Volatile (VP > ${threshLabel})`;
     volatilityIndicator.className = 'volatility-badge volatile';
   } else {
-    volatilityIndicator.textContent = `Non-Volatile (VP â¤ ${threshLabel})`;
+    volatilityIndicator.textContent = `Non-Volatile (VP ≤ ${threshLabel})`;
     volatilityIndicator.className = 'volatility-badge non-volatile';
   }
 }
 
 vaporPressureInput.addEventListener('input', updateVolatilityIndicator);
 unitSystemSelect.addEventListener('change', updateVolatilityIndicator);
-updateVolatilityIndicator(); // initial run
+updateVolatilityIndicator();
 
-// ââ Helper: read numeric input (returns undefined if blank) ââââââââââââââââââ
+// --- Input helpers ----------------------------------------------------------
 
 function num(id) {
-  const v = $(id).value.trim();
+  const el = $(id);
+  if (!el) return undefined;
+  const v = el.value.trim();
   if (v === '') return undefined;
   const parsed = Number(v);
   return isNaN(parsed) ? undefined : parsed;
 }
 function str(id) {
-  const v = $(id).value.trim();
+  const el = $(id);
+  if (!el) return undefined;
+  const v = el.value.trim();
   return v === '' ? undefined : v;
 }
 function bool(id) {
-  return $(id).checked;
+  const el = $(id);
+  return el ? el.checked : false;
 }
 
-// ââ Assemble payload âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// --- Payload assembly -------------------------------------------------------
 
 function assemblePayload() {
   const us = unitSystemSelect.value;
 
-  // Meta
   const meta = {
-    disclaimer_accepted: true, // enforced by the checkbox gate
+    disclaimer_accepted: true,
     unit_system: us,
   };
   if (str('tagNumber'))   meta.tag_number   = str('tagNumber');
-  if (str('projectName')) meta.project_name  = str('projectName');
-  if (str('preparedBy'))  meta.prepared_by   = str('preparedBy');
+  if (str('projectName')) meta.project_name = str('projectName');
+  if (str('preparedBy'))  meta.prepared_by  = str('preparedBy');
 
   // Tank
   const tank = {
@@ -436,18 +536,15 @@ function assemblePayload() {
   };
   const dia = num('tankDiameter');
   const hgt = num('tankHeight');
-  const cra = num('coneRoofAngle');
   if (dia != null || hgt != null) {
     tank.dimensions = {};
-    if (dia != null) tank.dimensions.diameter = dia;
+    if (dia != null) tank.dimensions.diameter         = dia;
     if (hgt != null) tank.dimensions.height_or_length = hgt;
-    if (cra != null) tank.dimensions.cone_roof_angle = cra;
   }
   const elev = num('tankElevation');
   if (elev != null) tank.elevation_above_grade = elev;
 
-  // Fluid
-  // API 2000 Â§6.3.2: volatile if VP > 5 kPa (â 0.725 psia)
+  // Fluid — volatile if VP > 5 kPa (≈ 0.725 psia), per API 2000 §6.3.2
   const vp = num('vaporPressure');
   const OPS = window.API2000.OPERATIONAL;
   const volatilityThreshold = us === 'SI' ? OPS.VOLATILE_VP_THRESHOLD_KPA : OPS.VOLATILE_VP_THRESHOLD_PSIA;
@@ -460,23 +557,19 @@ function assemblePayload() {
     max_empty_rate: num('maxEmptyRate'),
   };
   const fluidName = str('fluidName');
-  if (fluidName)                       fluid.name = fluidName;
+  if (fluidName)                   fluid.name = fluidName;
   const operTemp = num('operatingTemp');
-  if (operTemp != null)                fluid.normal_operating_temp = operTemp;
+  if (operTemp != null)            fluid.normal_operating_temp = operTemp;
   const latent = num('latentHeat');
-  if (latent != null)                  fluid.latent_heat_of_vaporization = latent;
+  if (latent != null)              fluid.latent_heat_of_vaporization = latent;
   const molWt = num('molWeight');
-  if (molWt != null)                   fluid.molecular_weight = molWt;
+  if (molWt != null)               fluid.molecular_weight = molWt;
   const relTemp = num('relievingTemp');
-  if (relTemp != null)                 fluid.relieving_vapor_temp = relTemp;
-  const flash = num('flashPoint');
-  if (flash != null)                   fluid.flash_point = flash;
-  const sg = num('specificGravity');
-  if (sg != null)                      fluid.specific_gravity = sg;
+  if (relTemp != null)             fluid.relieving_vapor_temp = relTemp;
   const kVal = num('fluidK');
-  if (kVal != null)                    fluid.specific_heat_ratio = kVal;
+  if (kVal != null)                fluid.specific_heat_ratio = kVal;
   const ziVal = num('fluidZi');
-  if (ziVal != null)                   fluid.compressibility_factor = ziVal;
+  if (ziVal != null)               fluid.compressibility_factor = ziVal;
 
   // Environment
   const environment = {
@@ -487,8 +580,6 @@ function assemblePayload() {
     const ins = {};
     const thick = num('insulThickness');
     if (thick != null)                    ins.thickness = thick;
-    const surfA = num('insulSurfArea');
-    if (surfA != null)                    ins.surface_area = surfA;
     const condK = num('insulConductivity');
     if (condK != null)                    ins.thermal_conductivity = condK;
     const htc = num('insulHTC');
@@ -502,50 +593,48 @@ function assemblePayload() {
 
   // Abnormal scenarios
   const abnormal_scenarios = {
-    control_valve_failure:          bool('ab_controlValve'),
-    blanket_gas_equipment_failure:  bool('ab_blanketGas'),
-    abnormal_heat_transfer:         bool('ab_abnormalHeat'),
-    internal_heat_exchanger_failure:bool('ab_heatExchanger'),
-    uninsulated_hot_tank_in_rain:   bool('ab_hotTankRain'),
-    exothermic_reaction:            bool('ab_exothermic'),
-    mixing_of_products:             bool('ab_mixing'),
-    liquid_overfill:                bool('ab_overfill'),
+    control_valve_failure:               bool('ab_controlValve'),
+    blanket_gas_equipment_failure:       bool('ab_blanketGas'),
+    abnormal_heat_transfer:              bool('ab_abnormalHeat'),
+    internal_heat_exchanger_failure:     bool('ab_heatExchanger'),
+    uninsulated_hot_tank_in_rain:        bool('ab_hotTankRain'),
+    exothermic_reaction:                 bool('ab_exothermic'),
+    mixing_of_products:                  bool('ab_mixing'),
+    liquid_overfill:                     bool('ab_overfill'),
     pressure_transfer_vapor_breakthrough: bool('ab_vaporBreak'),
-    atmospheric_pressure_change:    bool('ab_atmChange'),
+    atmospheric_pressure_change:         bool('ab_atmChange'),
   };
 
   // Calculation options
   const calculation_options = {
     include_emergency_fire_case: bool('opt_fireCaseEnabled'),
-    use_simplified_fire_table:   bool('opt_simplifiedTable'),
     credit_for_drainage:         bool('opt_drainage'),
     credit_for_fireproofing:     bool('opt_fireproofing'),
   };
   const manualWA = num('manualWettedArea');
   if (manualWA != null) calculation_options.manual_wetted_area_override = manualWA;
 
-  // Collect installed venting devices from the Actual Venting tab
   const devices = collectDeviceData();
 
   return { meta, tank, fluid, environment, abnormal_scenarios, calculation_options, devices };
 }
 
-// ââ Render helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// --- Render helpers ---------------------------------------------------------
 
 function fmtVal(v, unit) {
-  if (v == null || v === '') return 'â';
+  if (v == null || v === '') return '—';
   return `${Number(v).toLocaleString('en-US', { maximumFractionDigits: 4 })} ${unit || ''}`.trim();
 }
 
 function renderWarnings(warnings) {
   if (!warnings || warnings.length === 0) return '';
   return warnings.map(w => {
-    const isWarn = w.startsWith('WARNING');
+    const isWarn = w.severity === 'WARNING';
     const cls = isWarn ? 'alert-error' : 'alert-warn';
     const icon = isWarn
       ? '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
       : '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l6.5 12H1.5L8 1.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.5v.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
-    return `<div class="alert ${cls}">${icon}<span>${escapeHtml(w)}</span></div>`;
+    return `<div class="alert ${cls}">${icon}<span>${escapeHtml(w.message)}</span></div>`;
   }).join('');
 }
 
@@ -571,10 +660,9 @@ function escapeHtml(str) {
   return _escapeDiv.innerHTML;
 }
 
-// ââ Render full results âââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// --- Render full results ----------------------------------------------------
 
 function renderResults(result) {
-  // Handle error-only responses
   if (result.errors && result.errors.length > 0 && !result.outputs) {
     resultsContainer.innerHTML = renderErrors(result.errors);
     return;
@@ -586,12 +674,10 @@ function renderResults(result) {
   const hu = o.heat_unit;
 
   let html = '';
-
-  // Warnings & errors
   html += renderWarnings(result.warnings);
   html += renderErrors(result.errors);
 
-  // ââ Phase 5: Compliance Summary Dashboard âââââââââââââââââââââââââââââââ
+  // --- Compliance summary (actual vs required) ---
   if (o.actual_venting && o.governing) {
     const av = o.actual_venting;
     const ad = av.adequacy;
@@ -602,15 +688,12 @@ function renderResults(result) {
       : '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     const headerLabel = allPass
       ? 'All Venting Requirements Met'
-      : 'Venting Deficiency Detected â Review Required';
+      : 'Venting Deficiency Detected — Review Required';
 
     const passIcon = '<svg class="status-pass" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6 9.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     const failIcon = '<svg class="status-fail" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 6.5l5 5M11.5 6.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
 
-    // Build comparison rows
     const rows = [];
-
-    // Normal outbreathing: required = normal total, actual = actual normal
     if (o.normal_venting && o.normal_venting.totals) {
       rows.push({
         label:    'Normal Outbreathing',
@@ -619,16 +702,12 @@ function renderResults(result) {
         pass:     ad.normal_out,
       });
     }
-
-    // Emergency outbreathing: required = governing outbreathing, actual = actual emergency
     rows.push({
       label:    'Emergency Outbreathing',
       required: fmtVal(o.governing.governing_outbreathing, fu),
       actual:   fmtVal(av.actual_emergency_outbreathing, fu),
       pass:     ad.emergency_out,
     });
-
-    // Inbreathing: required = governing inbreathing, actual = actual inbreathing
     rows.push({
       label:    'Inbreathing (Vacuum)',
       required: fmtVal(o.governing.governing_inbreathing, fu),
@@ -655,66 +734,53 @@ function renderResults(result) {
       </div>`;
   }
 
-  // Governing requirements (featured prominently)
   if (o.governing) {
     html += `
       <div class="result-section governing-box">
         <h3>Governing Requirements</h3>
         <table class="result-table">
           ${tableRow('Governing Outbreathing (pressure)', fmtVal(o.governing.governing_outbreathing, fu))}
-          ${tableRow('Governing Inbreathing (vacuum)', fmtVal(o.governing.governing_inbreathing, fu))}
-          ${tableRow('Emergency Governs?', o.governing.emergency_governs ? 'Yes â Fire case controls outbreathing' : 'No â Normal venting controls')}
+          ${tableRow('Governing Inbreathing (vacuum)',    fmtVal(o.governing.governing_inbreathing, fu))}
+          ${tableRow('Emergency Governs?', o.governing.emergency_governs ? 'Yes — Fire case controls outbreathing' : 'No — Normal venting controls')}
         </table>
       </div>`;
   }
 
-  // Normal venting â Thermal
   if (o.normal_venting) {
     const nv = o.normal_venting;
     html += `
       <div class="result-section">
-        <h3>Normal Venting â Thermal Breathing</h3>
+        <h3>Normal Venting — Thermal Breathing</h3>
         <table class="result-table">
-          ${tableRow('Thermal Inbreathing', fmtVal(nv.thermal.inbreathing, fu))}
+          ${tableRow('Thermal Inbreathing',  fmtVal(nv.thermal.inbreathing, fu))}
           ${tableRow('Thermal Outbreathing', fmtVal(nv.thermal.outbreathing, fu))}
-          ${tableRow('Insulation Factor', fmtVal(nv.thermal.insulation_factor))}
-          ${tableRow('Latitude Zone', nv.thermal.latitude_zone.replace(/_/g, ' '))}
+          ${tableRow('Insulation Factor',    fmtVal(nv.thermal.insulation_factor))}
+          ${tableRow('Latitude Zone',        nv.thermal.latitude_zone.replace(/_/g, ' '))}
         </table>
-      </div>`;
-
-    // Normal venting â Operational
-    html += `
+      </div>
       <div class="result-section">
-        <h3>Normal Venting â Operational Breathing</h3>
+        <h3>Normal Venting — Operational Breathing</h3>
         <table class="result-table">
-          ${tableRow('Operational Inbreathing', fmtVal(nv.operational.inbreathing, fu))}
-          ${tableRow('Operational Outbreathing', fmtVal(nv.operational.outbreathing, fu))}
-          ${tableRow('Vaporisation Component', fmtVal(nv.operational.vaporisation_component, fu))}
-          ${tableRow('Is Volatile?', nv.operational.is_volatile ? 'Yes' : 'No')}
+          ${tableRow('Operational Inbreathing',   fmtVal(nv.operational.inbreathing, fu))}
+          ${tableRow('Operational Outbreathing',  fmtVal(nv.operational.outbreathing, fu))}
+          ${tableRow('Vaporisation Component',    fmtVal(nv.operational.vaporisation_component, fu))}
+          ${tableRow('Is Volatile?',              nv.operational.is_volatile ? 'Yes' : 'No')}
         </table>
-      </div>`;
-
-    // Normal venting â Totals
-    html += `
+      </div>
       <div class="result-section">
-        <h3>Normal Venting â Totals</h3>
+        <h3>Normal Venting — Totals</h3>
         <table class="result-table">
-          ${tableRow('Total Normal Inbreathing', fmtVal(nv.totals.total_inbreathing, fu), true)}
+          ${tableRow('Total Normal Inbreathing',  fmtVal(nv.totals.total_inbreathing, fu),  true)}
           ${tableRow('Total Normal Outbreathing', fmtVal(nv.totals.total_outbreathing, fu), true)}
         </table>
       </div>`;
   }
 
-  // Emergency venting
   if (o.emergency_venting) {
     const ev = o.emergency_venting;
     let evRows = '';
     if (ev.wetted_area != null)
       evRows += tableRow('Wetted Area', fmtVal(ev.wetted_area, au));
-    if (ev.raw_wetted_area != null && ev.raw_wetted_area !== ev.wetted_area)
-      evRows += tableRow('Raw Wetted Area (before cap)', fmtVal(ev.raw_wetted_area, au));
-    if (ev.wetted_area_capped != null)
-      evRows += tableRow('Wetted Area Capped?', ev.wetted_area_capped ? 'Yes' : 'No');
     if (ev.wetted_area_method)
       evRows += tableRow('Calculation Method', ev.wetted_area_method);
     if (ev.heat_input != null)
@@ -729,17 +795,53 @@ function renderResults(result) {
     if (evRows) {
       html += `
         <div class="result-section">
-          <h3>Emergency Venting â Fire Case</h3>
+          <h3>Emergency Venting — Fire Case</h3>
           <table class="result-table">${evRows}</table>
         </div>`;
     }
   }
 
-  // ââ Phase 5.3: Installed Device Breakdown ââââââââââââââââââââââââââââââ
   if (o.actual_venting && o.actual_venting.devices && o.actual_venting.devices.length > 0) {
     const devs = o.actual_venting.devices;
     const typeLabels = { PVRV: 'PVRV', EPRV: 'EPRV', FREE_VENT: 'Free Vent' };
     const typeCls    = { PVRV: 'pvrv', EPRV: 'eprv', FREE_VENT: 'free-vent' };
+
+    // --- Per-device flame-arrestor breakdown (only if at least one is attached) ---
+    const arrestorDevs = devs.filter(d => d.arrestor);
+    if (arrestorDevs.length > 0) {
+      const badgeCls = { PASS: 'pass', WARN: 'warn', FAIL: 'fail' };
+      html += `
+        <div class="result-section">
+          <h3>Flame Arrestor — Pressure Drop &amp; Budget (ISO 16852)</h3>
+          <table class="arrestor-results-table">
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>ΔP (mbar)</th>
+                <th>ΔP (inH₂O)</th>
+                <th>% of Budget</th>
+                <th>Eff. Flow</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${devs.map((d, i) => {
+                if (!d.arrestor) return '';
+                const a  = d.arrestor;
+                const bc = badgeCls[a.badge] || 'pass';
+                return `<tr>
+                  <td>#${i + 1} — ${escapeHtml(typeLabels[d.type] || d.type)}</td>
+                  <td>${fmtVal(a.deltaP_mbar, 'mbar')}</td>
+                  <td>${fmtVal(a.deltaP_inH2O, 'inH₂O')}</td>
+                  <td>${fmtVal(a.budget_pct, '%')}</td>
+                  <td>${fmtVal(a.effective_flow, fu)}</td>
+                  <td><span class="fa-badge ${bc}">${escapeHtml(a.badge)}</span></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    }
 
     html += `
       <div class="device-breakdown">
@@ -756,15 +858,15 @@ function renderResults(result) {
           </thead>
           <tbody>
             ${devs.map((d, i) => {
-              const tLabel = typeLabels[d.type] || d.type;
-              const tCls   = typeCls[d.type]   || '';
+              const tLabel   = typeLabels[d.type] || d.type;
+              const tCls     = typeCls[d.type]   || '';
               const dirLabel = d.direction === 'BOTH' ? 'Both' : d.direction === 'OUTBREATHING' ? 'Pressure' : 'Vacuum';
               return `<tr>
                 <td>${i + 1}</td>
                 <td><span class="type-badge ${tCls}">${escapeHtml(tLabel)}</span></td>
                 <td>${escapeHtml(dirLabel)}</td>
-                <td class="mono-val">${d.flow_out != null && d.flow_out > 0 ? fmtVal(d.flow_out, fu) : 'â'}</td>
-                <td class="mono-val">${d.flow_in != null && d.flow_in > 0 ? fmtVal(d.flow_in, fu) : 'â'}</td>
+                <td class="mono-val">${d.flow_out != null && d.flow_out > 0 ? fmtVal(d.flow_out, fu) : '—'}</td>
+                <td class="mono-val">${d.flow_in  != null && d.flow_in  > 0 ? fmtVal(d.flow_in,  fu) : '—'}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -779,7 +881,6 @@ function renderResults(result) {
       </div>`;
   }
 
-  // Intermediates (collapsible)
   if (result.intermediates) {
     const im = result.intermediates;
     html += `
@@ -790,21 +891,20 @@ function renderResults(result) {
         </div>
         <div class="collapsible-body">
           <table class="result-table">
-            ${tableRow('Volume', fmtVal(im.volume_m3, 'mÂ³'))}
-            ${tableRow('MAWP', fmtVal(im.mawp_kpa, 'kPa(g)'))}
-            ${tableRow('MAWV', fmtVal(im.mawv_kpa, 'kPa(g)'))}
-            ${tableRow('Allowable Overpressure', fmtVal(im.allowable_overpressure_pct, '%'))}
-            ${tableRow('Fill Rate', fmtVal(im.fill_rate_m3hr, 'mÂ³/hr'))}
-            ${tableRow('Empty Rate', fmtVal(im.empty_rate_m3hr, 'mÂ³/hr'))}
-            ${tableRow('Vapor Pressure', fmtVal(im.vapor_pressure_kpa, 'kPa(a)'))}
-            ${tableRow('Latent Heat', fmtVal(im.latent_heat_J_kg, 'J/kg'))}
-            ${tableRow('Relieving Pressure', fmtVal(im.relieving_pressure_kpa_a, 'kPa(a)'))}
-            ${tableRow('Relieving Temperature', fmtVal(im.relieving_temp_C, 'Â°C'))}
-            ${tableRow('Thermal Bare Inbreathing', fmtVal(im.thermal_bare_in_Nm3hr, 'NmÂ³/hr'))}
-            ${tableRow('Thermal Bare Outbreathing', fmtVal(im.thermal_bare_out_Nm3hr, 'NmÂ³/hr'))}
-            ${tableRow('Insulation Factor', fmtVal(im.insulation_factor))}
-            ${im.wetted_area_m2 != null ? tableRow('Wetted Area', fmtVal(im.wetted_area_m2, 'mÂ²')) : ''}
-            ${im.heat_input_W != null ? tableRow('Heat Input', fmtVal(im.heat_input_W, 'W')) : ''}
+            ${tableRow('Volume',                      fmtVal(im.volume_m3, 'm³'))}
+            ${tableRow('MAWP',                        fmtVal(im.mawp_kpa, 'kPa(g)'))}
+            ${tableRow('MAWV',                        fmtVal(im.mawv_kpa, 'kPa(g)'))}
+            ${tableRow('Fill Rate',                   fmtVal(im.fill_rate_m3hr, 'm³/hr'))}
+            ${tableRow('Empty Rate',                  fmtVal(im.empty_rate_m3hr, 'm³/hr'))}
+            ${tableRow('Vapor Pressure',              fmtVal(im.vapor_pressure_kpa, 'kPa(a)'))}
+            ${tableRow('Latent Heat',                 fmtVal(im.latent_heat_J_kg, 'J/kg'))}
+            ${tableRow('Relieving Pressure',          fmtVal(im.relieving_pressure_kpa_a, 'kPa(a)'))}
+            ${tableRow('Relieving Temperature',       fmtVal(im.relieving_temp_C, '°C'))}
+            ${tableRow('Thermal Bare Inbreathing',    fmtVal(im.thermal_bare_in_Nm3hr, 'Nm³/hr'))}
+            ${tableRow('Thermal Bare Outbreathing',   fmtVal(im.thermal_bare_out_Nm3hr, 'Nm³/hr'))}
+            ${tableRow('Insulation Factor',           fmtVal(im.insulation_factor))}
+            ${im.wetted_area_m2 != null ? tableRow('Wetted Area', fmtVal(im.wetted_area_m2, 'm²')) : ''}
+            ${im.heat_input_W  != null ? tableRow('Heat Input',  fmtVal(im.heat_input_W, 'W'))    : ''}
           </table>
         </div>
       </div>`;
@@ -812,7 +912,6 @@ function renderResults(result) {
 
   resultsContainer.innerHTML = html;
 
-  // ââ Wire up collapsible toggles ââââââââââââââââââââââââââââââââââââââââââ
   resultsContainer.querySelectorAll('[data-collapsible]').forEach(toggle => {
     toggle.addEventListener('click', () => {
       toggle.classList.toggle('open');
@@ -821,7 +920,7 @@ function renderResults(result) {
   });
 }
 
-// ââ Form submission ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// --- Form submission --------------------------------------------------------
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();
