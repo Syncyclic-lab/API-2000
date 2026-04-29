@@ -42,13 +42,24 @@
         table[n - 1][0], table[n - 1][col],
       );
     }
-    for (let i = 0; i < n - 1; i++) {
-      if (volume >= table[i][0] && volume <= table[i + 1][0]) {
+    let low = 0;
+    let high = n - 2;
+
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const vMid = table[mid][0];
+      const vMid1 = table[mid + 1][0];
+
+      if (volume >= vMid && volume <= vMid1) {
         return logLogInterp(
           volume,
-          table[i][0], table[i][col],
-          table[i + 1][0], table[i + 1][col],
+          vMid, table[mid][col],
+          vMid1, table[mid + 1][col],
         );
+      } else if (volume < vMid) {
+        high = mid - 1;
+      } else {
+        low = mid + 1;
       }
     }
     throw new Error('tableInterp: could not bracket volume ' + volume);
