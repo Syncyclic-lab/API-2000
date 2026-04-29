@@ -47,9 +47,6 @@
 
   // ─── TEMPERATURE ────────────────────────────────────────────────────────────
   const fToC = t => (t - 32) / 1.8;
-  const cToF = t => t * 1.8 + 32;
-  const fToR = t => t + C.F_TO_R;
-  const cToK = t => t + C.C_TO_K;
   const toC = (value, unitSystem) =>
     unitSystem === 'US' ? fToC(value) : value;
 
@@ -83,7 +80,7 @@
     ft2ToM2, m2ToFt2, toM2, areaToOutput,
     ftToM, mToFt, toMetres,
     psiToKpa, kpaToPsi, toKpa, gaugeToAbsKpa,
-    fToC, cToF, fToR, cToK, toC,
+    fToC, toC,
     toJkg, heatToOutput,
     inToM, mmToM, pipeDiamToM,
     convertDimsToSI,
