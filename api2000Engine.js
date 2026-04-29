@@ -7,6 +7,7 @@
 'use strict';
 
 (function () {
+  const api2000 = (typeof window !== 'undefined' ? window.API2000 : null) || {};
   const {
     TABLE1_SI,
     TABLE1_VOLUME_LIMITS_M3,
@@ -16,7 +17,7 @@
     PHYSICAL,
     INSULATION,
     OPEN_VENT,
-  } = window.API2000;
+  } = api2000;
 
   // --- INTERPOLATION -------------------------------------------------------
 
@@ -459,7 +460,7 @@
 
   // --- EXPORT --------------------------------------------------------------
 
-  window.API2000.engine = {
+  const engine = {
     logLogInterp,
     tableInterp,
     calcThermalVentingBare,
@@ -478,4 +479,11 @@
     calcActualVenting,
     generateWarnings,
   };
+
+  if (typeof window !== 'undefined' && window.API2000) {
+    window.API2000.engine = engine;
+  }
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = engine;
+  }
 })();
