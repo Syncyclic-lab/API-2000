@@ -65,6 +65,14 @@
   const pipeDiamToM = (value, unitSystem) =>
     unitSystem === 'US' ? inToM(value) : mmToM(value);
 
+  // ─── INSULATION ─────────────────────────────────────────────────────────────
+  const insulThicknessToM = (value, unitSystem) =>
+    unitSystem === 'US' ? value * C.IN_TO_M : value;
+  const insulConductivityToSI = (value, unitSystem) =>
+    unitSystem === 'US' ? value * C.BTU_IN_HR_FT2_F_TO_W_M_K : value;
+  const insulHTCToSI = (value, unitSystem) =>
+    unitSystem === 'US' ? value * C.BTU_HR_FT2_F_TO_W_M2_K : value;
+
   // ─── DIAMETER / DIMENSIONS ──────────────────────────────────────────────────
   const convertDimsToSI = (dims, unitSystem) => {
     if (!dims) return {};
@@ -86,6 +94,7 @@
     fToC, cToF, fToR, cToK, toC,
     toJkg, heatToOutput,
     inToM, mmToM, pipeDiamToM,
+    insulThicknessToM, insulConductivityToSI, insulHTCToSI,
     convertDimsToSI,
   };
 })();
