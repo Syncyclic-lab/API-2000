@@ -246,7 +246,7 @@
       // Flame-arrestor warnings (additive; only non-empty when an arrestor is attached)
       if (actual_venting_result && actual_venting_result.evaluated_devices && engine.generateArrestorWarnings) {
         const fa_warnings = engine.generateArrestorWarnings(actual_venting_result.evaluated_devices);
-        for (const w of fa_warnings) warnings.push(w);
+        warnings.push(...fa_warnings);
       }
 
       // --- Output unit conversion ---
