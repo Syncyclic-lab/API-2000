@@ -71,8 +71,6 @@ window.API2000.OPERATIONAL = {
   INBREATHING_FACTOR:               1.00,
   NON_VOLATILE_OUTBREATHING_FACTOR: 1.00,
   VOLATILE_OUTBREATHING_FACTOR:     2.00,
-  VOLATILE_VP_THRESHOLD_KPA:        5.0,
-  VOLATILE_VP_THRESHOLD_PSIA:       0.725,
 };
 
 // --- AIR PROPERTIES (for inbreathing through open vents) ---------------------

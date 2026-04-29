@@ -110,3 +110,85 @@ describe('Emergency Venting Logic Edge-Case Simulations', () => {
   });
 
 });
+
+describe('calculateOpenVentCapacity', () => {
+
+  it('returns 0 when any required argument is missing or zero', () => {
+    expect(engine.calculateOpenVentCapacity(0,   110,     101.325, 1.4, 300, 29, 1.0, 0.62)).toBe(0);
+    expect(engine.calculateOpenVentCapacity(0.1, 0,       101.325, 1.4, 300, 29, 1.0, 0.62)).toBe(0);
+    expect(engine.calculateOpenVentCapacity(0.1, 110,     0,       1.4, 300, 29, 1.0, 0.62)).toBe(0);
+    expect(engine.calculateOpenVentCapacity(0.1, 110,     101.325, 0,   300, 29, 1.0, 0.62)).toBe(0);
+    expect(engine.calculateOpenVentCapacity(0.1, 110,     101.325, 1.4, 0,   29, 1.0, 0.62)).toBe(0);
+    expect(engine.calculateOpenVentCapacity(0.1, 110,     101.325, 1.4, 300, 0,  1.0, 0.62)).toBe(0);
+  });
+
+  it('returns 0 when outlet pressure >= inlet pressure (no flow)', () => {
+    expect(engine.calculateOpenVentCapacity(0.1, 101.325, 101.325, 1.4, 300, 29, 1.0, 0.62)).toBe(0);
+    expect(engine.calculateOpenVentCapacity(0.1, 100,     101.325, 1.4, 300, 29, 1.0, 0.62)).toBe(0);
+  });
+
+  it('computes subsonic flow capacity (r > r_crit)', () => {
+    // r = 101.325 / 110 ≈ 0.921, r_crit (k=1.4) ≈ 0.528 → subsonic
+    const result = engine.calculateOpenVentCapacity(0.1, 110, 101.325, 1.4, 300, 29, 1.0, 0.62);
+    expect(result).toBeGreaterThan(1930);
+    expect(result).toBeLessThan(1932);
+  });
+
+  it('computes sonic (choked) flow capacity (r <= r_crit)', () => {
+    // r = 101.325 / 250 ≈ 0.405 → sonic
+    const result = engine.calculateOpenVentCapacity(0.1, 250, 101.325, 1.4, 300, 29, 1.0, 0.62);
+    expect(result).toBeGreaterThan(11183);
+    expect(result).toBeLessThan(11185);
+  });
+
+});
+
+describe('logLogInterp', () => {
+
+  it('interpolates linear y = x correctly', () => {
+    expect(engine.logLogInterp(10, 1, 1, 100, 100)).toBeCloseTo(10);
+  });
+
+  it('interpolates power-law y = x^2 correctly', () => {
+    expect(engine.logLogInterp(2, 1, 1, 4, 16)).toBeCloseTo(4);
+    expect(engine.logLogInterp(3, 1, 1, 4, 16)).toBeCloseTo(9);
+  });
+
+  it('returns endpoint values at boundaries', () => {
+    expect(engine.logLogInterp(1,   1, 10, 100, 1000)).toBeCloseTo(10);
+    expect(engine.logLogInterp(100, 1, 10, 100, 1000)).toBeCloseTo(1000);
+  });
+
+  it('extrapolates beyond the bracketed range', () => {
+    expect(engine.logLogInterp(0.5, 1, 1, 10, 10)).toBeCloseTo(0.5);
+    expect(engine.logLogInterp(20,  1, 1, 10, 10)).toBeCloseTo(20);
+  });
+
+  it('returns the constant when y0 == y1', () => {
+    expect(engine.logLogInterp(5, 1, 10, 10, 10)).toBeCloseTo(10);
+  });
+
+  it('handles very large values', () => {
+    expect(engine.logLogInterp(1e10, 1e9, 1e9, 1e11, 1e11)).toBeCloseTo(1e10, -5);
+  });
+
+  it('handles very small values', () => {
+    expect(engine.logLogInterp(1e-10, 1e-11, 1e-11, 1e-9, 1e-9)).toBeCloseTo(1e-10, 15);
+  });
+
+  it('returns NaN/Infinity when x0 == x1 (degenerate bracket)', () => {
+    const res = engine.logLogInterp(5, 10, 10, 10, 20);
+    expect(Number.isFinite(res)).toBe(false);
+  });
+
+  it('returns 0 for x = 0 (log → -Infinity collapses to 0)', () => {
+    expect(engine.logLogInterp(0, 1, 1, 10, 10)).toBe(0);
+  });
+
+  it('returns NaN for non-positive inputs that produce indeterminate forms', () => {
+    expect(Number.isNaN(engine.logLogInterp(-1, 1, 1, 10, 10))).toBe(true);
+    expect(Number.isNaN(engine.logLogInterp(5,  0, 1, 10, 10))).toBe(true);
+    expect(Number.isNaN(engine.logLogInterp(5,  1, 0, 10, 10))).toBe(true);
+  });
+
+});
