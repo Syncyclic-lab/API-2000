@@ -197,13 +197,20 @@
     if (!molecularWeight || molecularWeight <= 0) {
       throw new Error('Molecular weight is required for emergency venting calculation.');
     }
+    const T_relieve_K       = (relievingTempC ?? 20) + PHYSICAL.C_TO_K;
+
+    // API 2000 standard metric formula for equivalent air volume flow:
+    // q_a = 906.6 * (Q_W / L) * sqrt(T / M)
+    // where heatInputW implicitly includes Q_W * F
+    const nm3hr_std         = 906.6 * (heatInputW / latentHeatJkg) * Math.sqrt(T_relieve_K / molecularWeight);
+
+    // Original mass flow conversion kept for vapour mass flow reporting if needed
     const heatInputJ_hr     = heatInputW * PHYSICAL.SECONDS_PER_HOUR;
     const mass_flow_kg_hr   = heatInputJ_hr / latentHeatJkg;
     const mol_flow_kgmol_hr = mass_flow_kg_hr / molecularWeight;
-    const nm3hr_std         = mol_flow_kgmol_hr * PHYSICAL.MOLAR_VOL_NM3_KGMOL;
-    const sm3hr_std         = mol_flow_kgmol_hr * PHYSICAL.MOLAR_VOL_SM3_KGMOL;
-    const T_relieve_K       = (relievingTempC ?? 20) + PHYSICAL.C_TO_K;
+    const sm3hr_std         = nm3hr_std * (PHYSICAL.MOLAR_VOL_SM3_KGMOL / PHYSICAL.MOLAR_VOL_NM3_KGMOL);
     const Q_actual_m3hr     = nm3hr_std * (T_relieve_K / PHYSICAL.T_STD_SI) * (PHYSICAL.P_ATM_KPA / relievingPressureKpa);
+
     return {
       emergency_out_Nm3hr:       nm3hr_std,
       emergency_out_Sm3hr:       sm3hr_std,
@@ -339,10 +346,10 @@
         'The general formula Q = C × F × A^0.82 is applied using the full uncapped area per §7.2.1.');
     }
 
-    if (fluid.is_volatile && fluid.vapor_pressure_kpa > HIGH_VP_WARN_KPA) {
+    if (fluid.is_volatile && fluid.flash_point_C < 0) {
       push('WARNING',
-        'Vapour pressure is > 80 kPa absolute. The liquid may be near or above its ' +
-        'atmospheric bubble point. Verify relieving temperature and latent heat inputs.');
+        'Flash point is < 0 °C. The liquid is highly volatile and may be near or above its ' +
+        'atmospheric bubble point depending on storage temperature. Verify relieving temperature and latent heat inputs.');
     }
 
     if (inputs.tank.volume_m3 > TABLE1_VOLUME_LIMITS_M3.MAX) {

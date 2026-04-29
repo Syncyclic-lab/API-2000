@@ -55,7 +55,7 @@
 
       const fill_m3hr     = uc.liquidFlowToM3hr(fluid.max_fill_rate, us);
       const empty_m3hr    = uc.liquidFlowToM3hr(fluid.max_empty_rate, us);
-      const vp_kpa        = uc.toKpa(fluid.vapor_pressure, us);
+      const fp_C          = fluid.flash_point != null ? uc.toC(fluid.flash_point, us) : null;
       const latent_J_kg   = fluid.latent_heat_of_vaporization != null
         ? uc.toJkg(fluid.latent_heat_of_vaporization, us)
         : null;
@@ -236,7 +236,7 @@
       const enriched_inputs = {
         ...inputs,
         tank:    { ...tank,  volume_m3, mawp_kpa: mawp_kpag, mawv_kpa: mawv_kpag },
-        fluid:   { ...fluid, latent_heat_J_kg: latent_J_kg, vapor_pressure_kpa: vp_kpa },
+        fluid:   { ...fluid, latent_heat_J_kg: latent_J_kg, flash_point_C: fp_C },
         devices: actual_venting_result
           ? actual_venting_result.evaluated_devices
           : (inputs.devices || []),

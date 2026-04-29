@@ -830,13 +830,13 @@
             </div>
             <div class="field">
               <label>Volatility Classification</label>
-              <div id="volatilityIndicator" class="volatility-badge neutral">Enter vapor pressure</div>
+              <div id="volatilityIndicator" class="volatility-badge neutral">Enter flash point</div>
               <div class="hint">Auto-determined per API 2000 §6.3.2</div>
             </div>
             <div class="field">
-              <label for="vaporPressure">Vapor Pressure <span class="unit vp-unit">kPa(a)</span></label>
-              <input type="number" id="vaporPressure" step="any" min="0" required>
-              <div class="hint">At average storage temperature</div>
+              <label for="flashPoint">Flash Point <span class="unit temp-unit">°C</span></label>
+              <input type="number" id="flashPoint" step="any" required>
+              <div class="hint">Threshold: 38°C (100°F)</div>
             </div>
             <div class="field">
               <label for="operatingTemp">Operating Temperature <span class="unit temp-unit">°C</span></label>

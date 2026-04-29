@@ -466,30 +466,29 @@ insulationType.addEventListener('change', () => {
 // --- Auto-determine volatility from vapor pressure --------------------------
 
 const volatilityIndicator = $('volatilityIndicator');
-const vaporPressureInput  = $('vaporPressure');
+const flashPointInput     = $('flashPoint');
 
 function updateVolatilityIndicator() {
   const us = unitSystemSelect.value;
-  const vp = parseFloat(vaporPressureInput.value);
-  if (isNaN(vp) || vp === 0) {
-    volatilityIndicator.textContent = 'Enter vapor pressure';
+  const fp = parseFloat(flashPointInput.value);
+  if (isNaN(fp)) {
+    volatilityIndicator.textContent = 'Enter flash point';
     volatilityIndicator.className = 'volatility-badge neutral';
     return;
   }
-  const OP = window.API2000.OPERATIONAL;
-  const threshold = us === 'SI' ? OP.VOLATILE_VP_THRESHOLD_KPA : OP.VOLATILE_VP_THRESHOLD_PSIA;
-  const isVolatile = vp > threshold;
-  const threshLabel = us === 'SI' ? '5 kPa' : '0.725 psia';
+  const threshold = us === 'SI' ? 38 : 100;
+  const isVolatile = fp < threshold;
+  const threshLabel = us === 'SI' ? '38 °C' : '100 °F';
   if (isVolatile) {
-    volatilityIndicator.textContent = `Volatile (VP > ${threshLabel})`;
+    volatilityIndicator.textContent = `Volatile (FP < ${threshLabel})`;
     volatilityIndicator.className = 'volatility-badge volatile';
   } else {
-    volatilityIndicator.textContent = `Non-Volatile (VP ≤ ${threshLabel})`;
+    volatilityIndicator.textContent = `Non-Volatile (FP ≥ ${threshLabel})`;
     volatilityIndicator.className = 'volatility-badge non-volatile';
   }
 }
 
-vaporPressureInput.addEventListener('input', updateVolatilityIndicator);
+flashPointInput.addEventListener('input', updateVolatilityIndicator);
 unitSystemSelect.addEventListener('change', updateVolatilityIndicator);
 updateVolatilityIndicator();
 
@@ -544,15 +543,14 @@ function assemblePayload() {
   const elev = num('tankElevation');
   if (elev != null) tank.elevation_above_grade = elev;
 
-  // Fluid — volatile if VP > 5 kPa (≈ 0.725 psia), per API 2000 §6.3.2
-  const vp = num('vaporPressure');
-  const OPS = window.API2000.OPERATIONAL;
-  const volatilityThreshold = us === 'SI' ? OPS.VOLATILE_VP_THRESHOLD_KPA : OPS.VOLATILE_VP_THRESHOLD_PSIA;
-  const isVolatile = (vp != null && vp > volatilityThreshold);
+  // Fluid — volatile if flash point < 38°C (100°F)
+  const fp = num('flashPoint');
+  const volatilityThreshold = us === 'SI' ? 38 : 100;
+  const isVolatile = (fp != null && fp < volatilityThreshold);
 
   const fluid = {
     is_volatile:    isVolatile,
-    vapor_pressure: vp,
+    flash_point:    fp,
     max_fill_rate:  num('maxFillRate'),
     max_empty_rate: num('maxEmptyRate'),
   };
