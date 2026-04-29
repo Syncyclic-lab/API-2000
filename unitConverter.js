@@ -54,14 +54,10 @@
     unitSystem === 'US' ? fToC(value) : value;
 
   // ─── HEAT / ENTHALPY ───────────────────────────────────────────────────────
-  const btuhrToW  = q => q * C.BTU_HR_TO_W;
-  const wToBtuhr  = q => q * C.W_TO_BTU_HR;
-  const btulbToJkg = h => h * C.BTU_LB_TO_J_KG;
-  const jkgToBtulb = h => h * C.J_KG_TO_BTU_LB;
   const toJkg = (value, unitSystem) =>
-    unitSystem === 'US' ? btulbToJkg(value) : value;
+    unitSystem === 'US' ? value * C.BTU_LB_TO_J_KG : value;
   const heatToOutput = (watts, unitSystem) =>
-    unitSystem === 'US' ? wToBtuhr(watts) : watts;
+    unitSystem === 'US' ? watts * C.W_TO_BTU_HR : watts;
 
   // ─── PIPE DIAMETER (small bore: inches ↔ mm → metres) ────────────────────
   const inToM  = l => l * 0.0254;
@@ -88,7 +84,7 @@
     ftToM, mToFt, toMetres,
     psiToKpa, kpaToPsi, toKpa, gaugeToAbsKpa,
     fToC, cToF, fToR, cToK, toC,
-    btuhrToW, wToBtuhr, btulbToJkg, jkgToBtulb, toJkg, heatToOutput,
+    toJkg, heatToOutput,
     inToM, mmToM, pipeDiamToM,
     convertDimsToSI,
   };
