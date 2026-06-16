@@ -21,36 +21,57 @@ window.API2000.PHYSICAL = {
   SECONDS_PER_HOUR:    3600,
 };
 
-// --- TABLE 1: THERMAL VENTING (UNINSULATED TANKS, SI) ------------------------
-// Columns: [tank volume m³, inbreathing Nm³/hr, outbreathing Nm³/hr]
-
-window.API2000.TABLE1_SI = [
-  [      9.5,     1.7,     1.1 ],
-  [     15.9,     2.8,     1.9 ],
-  [     79.5,    14.2,     9.3 ],
-  [    158.9,    28.3,    18.7 ],
-  [    317.9,    51.0,    31.1 ],
-  [    794.9,   107.6,    62.3 ],
-  [  1_589.9,   187.0,   107.6 ],
-  [  3_179.7,   311.6,   178.5 ],
-  [  7_949.4,   623.1,   340.0 ],
-  [ 15_898.7, 1_002.0,   566.0 ],
-  [ 31_797.5, 1_558.0,   850.0 ],
-  [ 79_493.7, 2_861.0, 1_559.0 ],
-  [158_987.3, 4_703.0, 2_550.0 ],
+// --- THERMAL VENTING (API 2000 Annex A, Table A.3, SI) -----------------------
+// Simplified thermal-venting method. Inbreathing is read directly from the
+// table below as a function of tank capacity (latitude-independent — latitude
+// only enters the alternative §3.3.2 formula method). Out-breathing is derived
+// from inbreathing via the factors in THERMAL (Table A.3 footnotes c/d).
+//
+// Columns: [tank capacity m³, thermal inbreathing Nm³/hr of air]  (Table A.3 col. 2)
+window.API2000.TABLE_A3_SI = [
+  [    10,    1.69 ],
+  [    20,    3.38 ],
+  [   100,   16.9  ],
+  [   200,   33.8  ],
+  [   300,   50.4  ],
+  [   500,   84.5  ],
+  [   700,  118    ],
+  [  1000,  169    ],
+  [  1500,  254    ],
+  [  2000,  338    ],
+  [  3000,  507    ],
+  [  3180,  537    ],
+  [  4000,  647    ],
+  [  5000,  787    ],
+  [  6000,  896    ],
+  [  7000, 1003    ],
+  [  8000, 1077    ],
+  [  9000, 1136    ],
+  [ 10000, 1210    ],
+  [ 12000, 1345    ],
+  [ 14000, 1480    ],
+  [ 16000, 1615    ],
+  [ 18000, 1750    ],
+  [ 20000, 1877    ],
+  [ 25000, 2179    ],
+  [ 30000, 2495    ],
 ];
 
-window.API2000.TABLE1_VOLUME_LIMITS_M3 = {
-  MIN: 9.5,
-  MAX: 158_987,
+window.API2000.THERMAL = {
+  // Table A.3 footnote c: for stocks with a flash point ≥ 37.8 °C (non-volatile)
+  // the out-breathing requirement is 60 % of the inbreathing requirement.
+  OUT_FACTOR_NONVOLATILE: 0.60,
+  // Table A.3 footnote d: for stocks with a flash point < 37.8 °C (volatile)
+  // the out-breathing requirement is 100 % of the inbreathing requirement.
+  OUT_FACTOR_VOLATILE:    1.00,
 };
 
-// --- LATITUDE ZONE MULTIPLIERS (API 2000 §6.3.1) ------------------------------
-
-window.API2000.LATITUDE_FACTORS = {
-  BELOW_42N:            { inbreathing: 0.60, outbreathing: 1.00 },
-  BETWEEN_42N_AND_58N:  { inbreathing: 1.00, outbreathing: 1.00 },
-  ABOVE_58N:            { inbreathing: 1.45, outbreathing: 0.75 },
+// Applicability range of the API 2000 Annex A simplified thermal table.
+// Outside this range log-log extrapolation is applied and the result should be
+// verified with the §3.3.2 formula method.
+window.API2000.TABLE1_VOLUME_LIMITS_M3 = {
+  MIN: 10,
+  MAX: 30_000,
 };
 
 // --- FIRE-CASE HEAT INPUT (API 2000 §7.3.2, SI only) --------------------------

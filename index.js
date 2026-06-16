@@ -80,7 +80,9 @@
       };
 
       // --- Thermal venting ---
-      const bare_thermal = engine.calcThermalVentingBare(volume_m3, env.latitude_zone);
+      // Annex A Table A.3 thermal method: latitude-independent; out-breathing
+      // factor is selected from the fluid's volatility.
+      const bare_thermal = engine.calcThermalVentingBare(volume_m3, fluid.is_volatile);
       const thermal      = engine.applyInsulationFactor(bare_thermal, env_si);
 
       // --- Operational venting ---
@@ -164,34 +166,40 @@
           if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
             const pipe_d_m = d.pipe_diameter != null ? uc.pipeDiamToM(d.pipe_diameter, us) : null;
             const Cd       = d.discharge_coefficient ?? OPEN_V.DEFAULT_CD;
+            // Retained on the device for display/audit; the open-vent capacity
+            // itself is computed with AIR properties (see below).
             const k_fluid  = d.specific_heat_ratio ?? fluid.specific_heat_ratio ?? null;
             const Zi_fluid = d.compressibility_factor ?? fluid.compressibility_factor ?? 1.0;
-            const M_fluid  = fluid.molecular_weight ?? null;
 
             dev.pipe_diameter_m        = pipe_d_m;
             dev.discharge_coefficient  = Cd;
             dev.specific_heat_ratio    = k_fluid;
             dev.compressibility_factor = Zi_fluid;
 
+            // Open-vent (gooseneck) flows are air-equivalent for tanks at or
+            // below the standard's 49 °C basis (Annex D, Table D.1 / §D.9), so
+            // BOTH directions use AIR properties. This keeps out-breathing
+            // symmetric with inbreathing and removes the dependency on fluid
+            // M/k, which are not entered for normal-venting-only cases.
             if ((d.direction === 'BOTH' || d.direction === 'OUTBREATHING')) {
-              dev.rated_flow_outbreathing = (pipe_d_m && k_fluid && M_fluid)
+              dev.rated_flow_outbreathing = (pipe_d_m && Number.isFinite(relieving_P_kpaa))
                 ? engine.calculateOpenVentCapacity(
                     pipe_d_m, relieving_P_kpaa, PHYSICAL.P_ATM_KPA,
-                    k_fluid, T_relieving_K, M_fluid, Zi_fluid, Cd,
+                    AIR.k, T_relieving_K, AIR.M, AIR.Zi, Cd,
                   )
                 : 0;
             }
 
             if ((d.direction === 'BOTH' || d.direction === 'INBREATHING')) {
-              if (pipe_d_m) {
-                const vacuum_abs_kpa = Math.max(PHYSICAL.P_ATM_KPA - mawv_kpag, 0.1);
-                dev.rated_flow_inbreathing = engine.calculateOpenVentCapacity(
-                  pipe_d_m, PHYSICAL.P_ATM_KPA, vacuum_abs_kpa,
-                  AIR.k, T_ambient_K, AIR.M, AIR.Zi, Cd,
-                );
-              } else {
-                dev.rated_flow_inbreathing = 0;
-              }
+              const vacuum_abs_kpa = Number.isFinite(mawv_kpag)
+                ? Math.max(PHYSICAL.P_ATM_KPA - mawv_kpag, 0.1)
+                : null;
+              dev.rated_flow_inbreathing = (pipe_d_m && vacuum_abs_kpa != null)
+                ? engine.calculateOpenVentCapacity(
+                    pipe_d_m, PHYSICAL.P_ATM_KPA, vacuum_abs_kpa,
+                    AIR.k, T_ambient_K, AIR.M, AIR.Zi, Cd,
+                  )
+                : 0;
             }
           }
 

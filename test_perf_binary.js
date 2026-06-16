@@ -74,8 +74,8 @@ function tableInterpBinary(table, volume, col) {
   throw new Error('tableInterp: could not bracket volume ' + volume);
 }
 
-const { TABLE1_SI } = window.API2000;
-console.log(`Table length: ${TABLE1_SI.length}`);
+const { TABLE_A3_SI } = window.API2000;
+console.log(`Table length: ${TABLE_A3_SI.length}`);
 
 // We will test with a larger synthetic table to demonstrate the performance impact
 // which is a common scenario for generic interpolation functions.
@@ -103,12 +103,12 @@ function runBenchmark(interpFn, name, table, maxVol) {
 }
 
 // Warmup
-runBenchmark(tableInterpLinear, "Linear Small (Warmup)", TABLE1_SI, 158000);
-runBenchmark(tableInterpBinary, "Binary Small (Warmup)", TABLE1_SI, 158000);
+runBenchmark(tableInterpLinear, "Linear Small (Warmup)", TABLE_A3_SI, 30000);
+runBenchmark(tableInterpBinary, "Binary Small (Warmup)", TABLE_A3_SI, 30000);
 
 // Actual runs (Small Table)
-runBenchmark(tableInterpLinear, "Linear Small", TABLE1_SI, 158000);
-runBenchmark(tableInterpBinary, "Binary Small", TABLE1_SI, 158000);
+runBenchmark(tableInterpLinear, "Linear Small", TABLE_A3_SI, 30000);
+runBenchmark(tableInterpBinary, "Binary Small", TABLE_A3_SI, 30000);
 
 // Actual runs (Large Table)
 runBenchmark(tableInterpLinear, "Linear Large", largeTable, 10000);
