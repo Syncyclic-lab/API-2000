@@ -9,7 +9,7 @@ function runBenchmark() {
   let result;
   for (let i = 0; i < 1000000; i++) {
     const vol = (i % 150000) + 10;
-    result = engine.calcThermalVentingBare(vol, 'BELOW_42N');
+    result = engine.calcThermalVentingBare(vol, false);
   }
 
   const end = process.hrtime.bigint();

@@ -8,9 +8,9 @@
 
 (function () {
   const {
-    TABLE1_SI,
+    TABLE_A3_SI,
     TABLE1_VOLUME_LIMITS_M3,
-    LATITUDE_FACTORS,
+    THERMAL,
     FIRE_CASE,
     OPERATIONAL,
     PHYSICAL,
@@ -67,14 +67,19 @@
 
   // --- 1. THERMAL VENTING --------------------------------------------------
 
-  function calcThermalVentingBare(volumeM3, latitudeZone) {
-    const factors = LATITUDE_FACTORS[latitudeZone];
-    if (!factors) throw new Error('Unknown latitude zone: ' + latitudeZone);
-    const q_in_ref  = tableInterp(TABLE1_SI, volumeM3, 1);
-    const q_out_ref = tableInterp(TABLE1_SI, volumeM3, 2);
+  // API 2000 Annex A, Table A.3 (simplified method, SI). Inbreathing is read
+  // directly from the table (latitude-independent); out-breathing is 60 % of
+  // inbreathing for non-volatile stocks (Table A.3 col. 3 / footnote c) and
+  // 100 % for volatile stocks (col. 4 / footnote d). Returns uninsulated
+  // (R_i = 1) rates in Nm³/hr of air; applyInsulationFactor() applies R_i after.
+  function calcThermalVentingBare(volumeM3, isVolatile) {
+    const inbreathing = tableInterp(TABLE_A3_SI, volumeM3, 1);
+    const out_factor  = isVolatile
+      ? THERMAL.OUT_FACTOR_VOLATILE
+      : THERMAL.OUT_FACTOR_NONVOLATILE;
     return {
-      thermal_in:  q_in_ref  * factors.inbreathing,
-      thermal_out: q_out_ref * factors.outbreathing,
+      thermal_in:  inbreathing,
+      thermal_out: inbreathing * out_factor,
     };
   }
 
@@ -357,16 +362,16 @@
 
     if (inputs.tank.volume_m3 > TABLE1_VOLUME_LIMITS_M3.MAX) {
       push('NOTICE',
-        `Tank volume (${inputs.tank.volume_m3.toFixed(0)} m³) exceeds API 2000 Table 1 ` +
-        `maximum (${TABLE1_VOLUME_LIMITS_M3.MAX.toLocaleString()} m³). Log-log extrapolation is applied. ` +
-        'Verify with the standard extended table or formula method.');
+        `Tank volume (${inputs.tank.volume_m3.toFixed(0)} m³) exceeds the ` +
+        `${TABLE1_VOLUME_LIMITS_M3.MAX.toLocaleString()} m³ upper limit of API 2000 Annex A Table A.3. ` +
+        'Log-log extrapolation is applied; verify with the §3.3.2 formula method for very large tanks.');
     }
 
     if (inputs.tank.volume_m3 < TABLE1_VOLUME_LIMITS_M3.MIN) {
       push('NOTICE',
-        `Tank volume (${inputs.tank.volume_m3.toFixed(2)} m³) is below API 2000 Table 1 ` +
-        `minimum (${TABLE1_VOLUME_LIMITS_M3.MIN} m³ / 60 BBL). Downward log-log extrapolation is applied. ` +
-        'Results should be verified by the designer for very small tanks.');
+        `Tank volume (${inputs.tank.volume_m3.toFixed(2)} m³) is below the ` +
+        `${TABLE1_VOLUME_LIMITS_M3.MIN} m³ lower bound of API 2000 Annex A Table A.3. ` +
+        'Downward log-log extrapolation is applied; results should be verified by the designer for very small tanks.');
     }
 
     const activeAbnormal = Object.entries(abnormal_scenarios)
@@ -432,11 +437,6 @@
         const label = `Device #${i + 1} (${d.type})`;
 
         if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
-          if (d.specific_heat_ratio == null || d.compressibility_factor == null) {
-            push('WARNING',
-              `${label} uses calculated capacity but the ratio of specific heats (k) or ` +
-              'compressibility factor (Zi) is missing. Calculated flow will be zero.');
-          }
           if (d.discharge_coefficient != null &&
               (d.discharge_coefficient < OPEN_VENT.CD_MIN || d.discharge_coefficient > OPEN_VENT.CD_MAX)) {
             push('WARNING',
