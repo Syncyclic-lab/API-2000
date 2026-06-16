@@ -147,6 +147,7 @@
 
       // --- Actual installed venting devices ---
       let actual_venting_result = null;
+      let atm_open_vent_default_used = false;
 
       if (inputs.devices && inputs.devices.length > 0) {
         const flowToSI = (val) => val == null ? null : (us === 'US' ? uc.scfhToNm3hr(val) : val);
@@ -178,25 +179,36 @@
 
             // Open-vent (gooseneck) flows are air-equivalent for tanks at or
             // below the standard's 49 °C basis (Annex D, Table D.1 / §D.9), so
-            // BOTH directions use AIR properties. This keeps out-breathing
-            // symmetric with inbreathing and removes the dependency on fluid
-            // M/k, which are not entered for normal-venting-only cases.
+            // BOTH directions use AIR properties (symmetric in/out, no fluid
+            // M/k dependency).
+            //
+            // Open vents are sized at the tank's allowable pressure/vacuum.
+            // Atmospheric tanks legitimately have MAWP/MAWV = 0, so fall back to
+            // a standard allowable accumulation (OPEN_V.ATM_DEFAULT_ALLOWABLE_KPA)
+            // rather than returning zero flow.
+            const out_allow_kpag = (Number.isFinite(mawp_kpag) && mawp_kpag > 0)
+              ? mawp_kpag : OPEN_V.ATM_DEFAULT_ALLOWABLE_KPA;
+            const in_allow_kpag = (Number.isFinite(mawv_kpag) && mawv_kpag > 0)
+              ? mawv_kpag : OPEN_V.ATM_DEFAULT_ALLOWABLE_KPA;
+            if (out_allow_kpag !== mawp_kpag || in_allow_kpag !== mawv_kpag) {
+              atm_open_vent_default_used = true;
+            }
+            const vent_inlet_kpaa  = PHYSICAL.P_ATM_KPA + out_allow_kpag;
+            const vent_vacuum_kpaa = Math.max(PHYSICAL.P_ATM_KPA - in_allow_kpag, 0.1);
+
             if ((d.direction === 'BOTH' || d.direction === 'OUTBREATHING')) {
-              dev.rated_flow_outbreathing = (pipe_d_m && Number.isFinite(relieving_P_kpaa))
+              dev.rated_flow_outbreathing = pipe_d_m
                 ? engine.calculateOpenVentCapacity(
-                    pipe_d_m, relieving_P_kpaa, PHYSICAL.P_ATM_KPA,
+                    pipe_d_m, vent_inlet_kpaa, PHYSICAL.P_ATM_KPA,
                     AIR.k, T_relieving_K, AIR.M, AIR.Zi, Cd,
                   )
                 : 0;
             }
 
             if ((d.direction === 'BOTH' || d.direction === 'INBREATHING')) {
-              const vacuum_abs_kpa = Number.isFinite(mawv_kpag)
-                ? Math.max(PHYSICAL.P_ATM_KPA - mawv_kpag, 0.1)
-                : null;
-              dev.rated_flow_inbreathing = (pipe_d_m && vacuum_abs_kpa != null)
+              dev.rated_flow_inbreathing = pipe_d_m
                 ? engine.calculateOpenVentCapacity(
-                    pipe_d_m, PHYSICAL.P_ATM_KPA, vacuum_abs_kpa,
+                    pipe_d_m, PHYSICAL.P_ATM_KPA, vent_vacuum_kpaa,
                     AIR.k, T_ambient_K, AIR.M, AIR.Zi, Cd,
                   )
                 : 0;
@@ -255,6 +267,18 @@
       if (actual_venting_result && actual_venting_result.evaluated_devices && engine.generateArrestorWarnings) {
         const fa_warnings = engine.generateArrestorWarnings(actual_venting_result.evaluated_devices);
         warnings.push(...fa_warnings);
+      }
+
+      // Notice when an open vent was sized against the default atmospheric
+      // allowable because the tank MAWP/MAWV was 0 or not provided.
+      if (atm_open_vent_default_used) {
+        warnings.push({
+          severity: 'NOTICE',
+          message:
+            `One or more open vents were sized using the default atmospheric allowable of ` +
+            `${OPEN_V.ATM_DEFAULT_ALLOWABLE_KPA} kPa (≈ 2 in H₂O) because the tank MAWP and/or MAWV ` +
+            'is 0 or not provided. Enter the tank’s actual allowable pressure/vacuum to refine the capacity.',
+        });
       }
 
       // --- Output unit conversion ---

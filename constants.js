@@ -109,6 +109,10 @@ window.API2000.OPEN_VENT = {
   CD_MIN:     0.3,
   CD_MAX:     0.8,
   MIN_PIPE_DIAM_M: 0.0254,
+  // Default allowable pressure/vacuum (gauge kPa) used to size open vents on
+  // atmospheric tanks when MAWP/MAWV is 0 or not provided. 0.5 kPa ≈ 2 in H2O
+  // is the typical minimum PV-valve opening cited in API 2000 (C.3.4).
+  ATM_DEFAULT_ALLOWABLE_KPA: 0.5,
 };
 
 // --- INSULATION HEAT-TRANSFER DEFAULTS (API 2000 §4.4.2) ---------------------
