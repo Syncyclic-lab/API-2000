@@ -1,393 +1,470 @@
 // ============================================================
 // index.js  (browser build — orchestrator)
-// Accepts a validated input object, runs all API 2000
-// calculations, and returns a structured result object.
-// Depends on: constants.js, unitConverter.js, api2000Engine.js
+// Converts the form payload to SI, validates it, runs the API 2000
+// calculations, and returns { outputs, intermediates, warnings, errors }.
+// Depends on: constants.js, unitConverter.js, api2000Engine.js, flameArrestor.js
 // ============================================================
 
 'use strict';
 
 (function () {
-  const uc       = window.API2000.uc;
-  const engine   = window.API2000.engine;
-  const PHYSICAL = window.API2000.PHYSICAL;
-  const AIR      = window.API2000.AIR_PROPERTIES;
-  const OPEN_V   = window.API2000.OPEN_VENT;
+  const {
+    uc, engine, PHYSICAL, AIR_PROPERTIES: AIR, OPEN_VENT,
+    GENERAL_METHOD: GEN, ANNEX_A, FIRE, MAX_SCOPE_PRESSURE_KPA, CONVERSIONS,
+  } = window.API2000;
 
-  const round = (v, n = 2) => (v == null ? null : Math.round(v * 10 ** n) / 10 ** n);
-  const flowLabel = (us) => us === 'US' ? 'SCFH'   : 'Nm³/hr';
-  const areaLabel = (us) => us === 'US' ? 'ft²'    : 'm²';
-  const heatLabel = (us) => us === 'US' ? 'BTU/hr' : 'W';
+  const METHOD_LABELS = {
+    GENERAL: 'API 2000 §3.3.2 general method',
+    ANNEX_A: 'API 2000 Annex A alternative method',
+  };
+  const TYPE_LABELS = { PVRV: 'PVRV', EPRV: 'EPRV', FREE_VENT: 'Free Vent' };
+  const AMBIENT_C = OPEN_VENT.AMBIENT_AIR_TEMP_C;
 
-  function convertInsulationToSI(ins, us) {
-    if (!ins) return null;
+  const round = (v, n = 2) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10 ** n) / 10 ** n);
+  const isNonNegative = (v) => Number.isFinite(v) && v >= 0;
+  const isFraction = (v) => isNonNegative(v) && v <= 1;
+  const relievesOut = (d) => d.direction !== 'INBREATHING';
+  const relievesIn  = (d) => d.direction !== 'OUTBREATHING';
+
+  // --- Input conversion and validation ---------------------------------------
+
+  function toSI(p) {
+    const us = p.meta.unit_system;
+    const c = (fn, v) => (v == null ? null : fn(v, us));
+    const { tank = {}, fluid = {}, environment: env = {}, fire = {} } = p;
     return {
-      insulation_thickness:         ins.thickness != null ? uc.insulThicknessToM(ins.thickness, us) : null,
-      thermal_conductivity:         ins.thermal_conductivity != null ? uc.insulConductivityToSI(ins.thermal_conductivity, us) : null,
-      internal_heat_transfer_coeff: ins.internal_heat_transfer_coefficient != null ? uc.insulHTCToSI(ins.internal_heat_transfer_coefficient, us) : null,
-      coverage_fraction:            ins.coverage_fraction,
+      us,
+      method: p.meta.method === 'GENERAL' ? 'GENERAL' : 'ANNEX_A',
+      tank: {
+        shape:       tank.shape,
+        volume_m3:   c(uc.toM3, tank.volume),
+        mawp_kpag:   c(uc.toKpa, tank.mawp),
+        mawv_kpag:   c(uc.toKpa, tank.mawv),
+        diameter_m:  c(uc.toMetres, tank.diameter),
+        length_m:    c(uc.toMetres, tank.height_or_length),
+        elevation_m: c(uc.toMetres, tank.elevation_above_grade) ?? 0,
+      },
+      fluid: {
+        flash_point_C:        c(uc.toC, fluid.flash_point),
+        vapor_pressure_class: fluid.vapor_pressure_class || 'HIGHER',
+        operating_temp_C:     c(uc.toC, fluid.operating_temp),
+        relieving_temp_C:     c(uc.toC, fluid.relieving_temp),
+        fill_m3hr:            c(uc.toM3, fluid.max_fill_rate),
+        empty_m3hr:           c(uc.toM3, fluid.max_empty_rate),
+        latent_J_kg:          c(uc.toJkg, fluid.latent_heat),
+        molecular_weight:     fluid.molecular_weight ?? null,
+      },
+      env: {
+        latitude:                     env.latitude_zone,
+        insulation_type:              env.insulation_type || 'UNINSULATED',
+        thickness_m:                  c(uc.smallLengthToM, env.insulation_thickness),
+        conductivity:                 c(uc.insulConductivityToSI, env.insulation_conductivity),
+        h_inside:                     c(uc.insulHTCToSI, env.inside_htc),
+        coverage_fraction:            env.coverage_fraction ?? null,
+        outside_containment_fraction: env.outside_containment_fraction ?? null,
+      },
+      fire: {
+        include:              fire.include !== false,
+        environmental_factor: fire.environmental_factor || 'BARE',
+        custom_factor:        fire.custom_factor ?? null,
+        manual_wetted_m2:     c(uc.toM2, fire.manual_wetted_area),
+      },
+      abnormal: p.abnormal_scenarios || {},
+      devices:  p.devices || [],
     };
   }
 
-  function runCalculation(inputs) {
+  function validate(s) {
     const errors = [];
-    const us     = inputs.meta.unit_system;
+    const need = (ok, message) => { if (!ok) errors.push(message); };
+    const { method, tank, fluid, env, fire } = s;
+    const insulated = env.insulation_type === 'FULLY_INSULATED' || env.insulation_type === 'PARTIALLY_INSULATED';
 
-    if (!inputs.meta.disclaimer_accepted) {
-      return {
-        errors: ['Calculation cannot proceed until the engineering disclaimer is accepted.'],
-        warnings: [],
+    need(tank.volume_m3 > 0, 'Enter a tank volume greater than zero.');
+    need(isNonNegative(tank.mawp_kpag), 'Enter the tank MAWP (0 for an atmospheric tank).');
+    need(isNonNegative(tank.mawv_kpag), 'Enter the tank MAWV (0 for an atmospheric tank).');
+    need(isNonNegative(fluid.fill_m3hr), 'Enter the maximum fill rate (0 if none).');
+    need(isNonNegative(fluid.empty_m3hr), 'Enter the maximum empty rate (0 if none).');
+
+    if (method === 'ANNEX_A') {
+      need(fluid.flash_point_C != null, 'Flash point is required for the Annex A method (volatility per Table A.1).');
+    } else {
+      if (insulated) need(env.thickness_m > 0 && env.conductivity > 0, 'Enter the insulation thickness and thermal conductivity for an insulated tank.');
+      if (env.insulation_type === 'PARTIALLY_INSULATED') need(isFraction(env.coverage_fraction), 'Enter the insulated fraction of the tank surface (0–1).');
+      if (env.insulation_type === 'DOUBLE_WALL') need(isFraction(env.outside_containment_fraction), 'Enter the fraction of the tank surface outside the containment tank (0–1).');
+    }
+
+    if (fire.include) {
+      if (fire.environmental_factor === 'INSULATED') {
+        need(insulated && env.thickness_m > 0 && env.conductivity > 0,
+          'The insulated environmental factor needs an insulated tank type with insulation thickness and thermal conductivity.');
+      }
+      if (fire.environmental_factor === 'CUSTOM') need(isFraction(fire.custom_factor), 'Enter a custom environmental factor F between 0 and 1.');
+      if (fire.manual_wetted_m2 == null) {
+        need(tank.diameter_m > 0, 'Enter the tank diameter (or a manual wetted area) for the fire case.');
+        if (tank.shape !== 'SPHERE') need(tank.length_m > 0, 'Enter the tank height/length (or a manual wetted area) for the fire case.');
+      } else {
+        need(isNonNegative(fire.manual_wetted_m2), 'The manual wetted area cannot be negative.');
+      }
+    }
+    return errors;
+  }
+
+  // --- Calculation steps ------------------------------------------------------
+
+  function calcNormalVenting(s) {
+    const { method, tank, fluid, env } = s;
+    let isVolatile, thermal, Ri = null;
+    if (method === 'GENERAL') {
+      isVolatile = fluid.vapor_pressure_class !== 'NONVOLATILE';
+      Ri = engine.calcInsulationReduction(env);
+      thermal = engine.calcThermalGeneral(tank.volume_m3, env.latitude, fluid.vapor_pressure_class, fluid.operating_temp_C, Ri);
+    } else {
+      isVolatile = fluid.flash_point_C < ANNEX_A.VOLATILE_FLASH_POINT_C;
+      thermal = engine.calcThermalAnnexA(tank.volume_m3, isVolatile);
+    }
+    const liquid = engine.calcLiquidMovement(method, fluid.fill_m3hr, fluid.empty_m3hr, isVolatile);
+    return {
+      ...thermal,
+      ...liquid,
+      Ri,
+      is_volatile: isVolatile,
+      total_in:  thermal.thermal_in + liquid.liquid_in,
+      total_out: thermal.thermal_out + liquid.liquid_out,
+    };
+  }
+
+  function calcFireCase(s) {
+    const { tank, fluid, env, fire } = s;
+    const wetted = fire.manual_wetted_m2 != null
+      ? { wetted_area_m2: fire.manual_wetted_m2, limit_governs: false, method: 'Manual override' }
+      : engine.calcWettedArea(tank.shape, tank.diameter_m, tank.length_m, tank.elevation_m);
+    const heat_input_W = engine.calcFireHeatInput(wetted.wetted_area_m2, tank.mawp_kpag);
+    const F = engine.calcEnvironmentalFactor(fire.environmental_factor, {
+      thickness_m: env.thickness_m, conductivity: env.conductivity, custom: fire.custom_factor,
+    });
+
+    const userFluid = fluid.latent_J_kg > 0 && fluid.molecular_weight > 0;
+    const relieving_temp_C = fluid.relieving_temp_C ?? fluid.operating_temp_C ?? AMBIENT_C;
+    const basis = userFluid
+      ? { L: fluid.latent_J_kg, M: fluid.molecular_weight, T_K: relieving_temp_C + PHYSICAL.C_TO_K }
+      : FIRE.HEXANE;
+    return {
+      ...wetted,
+      heat_input_W,
+      F,
+      basis: userFluid ? 'FLUID' : 'HEXANE',
+      L: basis.L,
+      M: basis.M,
+      T_K: basis.T_K,
+      ...engine.calcEmergencyVenting(heat_input_W, F, basis.L, basis.M, basis.T_K),
+    };
+  }
+
+  // Converts devices to SI and computes calculated open-vent capacities.
+  function devicesToSI(s) {
+    const { us, tank, fluid } = s;
+    const c = (fn, v) => (v == null ? null : fn(v, us));
+    const P_ATM = PHYSICAL.P_ATM_KPA;
+    // Open vents are sized at the tank allowable pressure/vacuum with air
+    // properties (air-equivalent flow, Annex D.9). Atmospheric tanks entered with
+    // MAWP/MAWV = 0 use a default allowable accumulation instead.
+    const allowP = tank.mawp_kpag > 0 ? tank.mawp_kpag : OPEN_VENT.ATM_DEFAULT_ALLOWABLE_KPA;
+    const allowV = tank.mawv_kpag > 0 ? tank.mawv_kpag : OPEN_VENT.ATM_DEFAULT_ALLOWABLE_KPA;
+    const vapourTempC = fluid.relieving_temp_C ?? fluid.operating_temp_C ?? AMBIENT_C;
+    let atmDefaultUsed = false;
+
+    const devices = s.devices.map(d => {
+      const dev = {
+        ...d,
+        set_pressure:            c(uc.toKpa, d.set_pressure),
+        set_vacuum:              c(uc.toKpa, d.set_vacuum),
+        rated_flow_outbreathing: c(uc.toNm3hr, d.rated_flow_outbreathing),
+        rated_flow_inbreathing:  c(uc.toNm3hr, d.rated_flow_inbreathing),
       };
+      if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
+        const diameter = c(uc.smallLengthToM, d.pipe_diameter);
+        const Cd = d.discharge_coefficient ?? OPEN_VENT.DEFAULT_CD;
+        const capacity = (pIn, pOut, tempC) => engine.calculateOpenVentCapacity(
+          diameter, pIn, pOut, AIR.k, tempC + PHYSICAL.C_TO_K, AIR.M, AIR.Zi, Cd);
+        dev.pipe_diameter_m = diameter;
+        dev.discharge_coefficient = Cd;
+        if (relievesOut(d)) {
+          dev.rated_flow_outbreathing = capacity(P_ATM + allowP, P_ATM, vapourTempC);
+          atmDefaultUsed = atmDefaultUsed || !(tank.mawp_kpag > 0);
+        }
+        if (relievesIn(d)) {
+          dev.rated_flow_inbreathing = capacity(P_ATM, Math.max(P_ATM - allowV, 0.1), AMBIENT_C);
+          atmDefaultUsed = atmDefaultUsed || !(tank.mawv_kpag > 0);
+        }
+      }
+      return dev;
+    });
+    return { devices, atmDefaultUsed };
+  }
+
+  // --- Warnings ---------------------------------------------------------------
+
+  function collectWarnings(s, fireCase, actual, atmDefaultUsed) {
+    const out = [];
+    const warn = (message) => out.push({ severity: 'WARNING', message });
+    const notice = (message) => out.push({ severity: 'NOTICE', message });
+    const { method, tank, fluid, env, fire } = s;
+
+    // Normal venting basis
+    if (method === 'ANNEX_A') {
+      if (env.insulation_type !== 'UNINSULATED') {
+        warn('Annex A applies only to uninsulated tanks (A.1.2). No insulation or double-wall reduction ' +
+          'has been applied; use the §3.3.2 general method to take credit for it.');
+      }
+      if (tank.volume_m3 > ANNEX_A.MAX_VOLUME_M3) {
+        warn(`Tank volume (${tank.volume_m3.toFixed(0)} m³) exceeds the 30,000 m³ limit of Annex A ` +
+          '(Table A.3 note a). Table A.3 has been extrapolated; use the §3.3.2 general method.');
+      }
+      if (Math.max(fluid.operating_temp_C ?? -Infinity, fluid.relieving_temp_C ?? -Infinity) > ANNEX_A.MAX_TEMP_C) {
+        warn('A temperature above 48.9 °C was entered. Annex A is limited to vapour-space temperatures of ' +
+          'about 48.9 °C (A.1.2, A.3.1.4); use the §3.3.2 general method.');
+      }
+    } else {
+      if (fluid.operating_temp_C == null && fluid.vapor_pressure_class !== 'HIGHER') {
+        notice('Average storage temperature not entered; the Table 2 C-factor for ≥ 25 °C has been used (conservative).');
+      }
+      if (fluid.operating_temp_C > GEN.AIR_EQUIVALENT_TEMP_LIMIT_C) {
+        notice('Storage temperature exceeds 49 °C. Filling out-breathing should be converted to an ' +
+          'air-equivalent flow per Annex D.9 (§3.3.2.2.1); it is reported here unconverted.');
+      }
+    }
+
+    const abnormal = Object.entries(s.abnormal)
+      .filter(([, v]) => v === true)
+      .map(([k]) => k.replace(/_/g, ' '));
+    if (abnormal.length > 0) {
+      notice(`These scenarios are selected but NOT included in the results: ${abnormal.join(', ')}. ` +
+        'Quantify these loads separately per API 2000 §3.2.5.');
+    }
+
+    // Emergency venting
+    if (!fire.include) {
+      notice('Emergency (fire-case) venting is excluded. This is only appropriate where justified, e.g. a tank ' +
+        'with a weak roof-to-shell attachment (§3.3.3.2).');
+    } else {
+      if (fireCase.basis === 'HEXANE') {
+        notice('Latent heat and/or molecular weight not provided, so emergency venting uses the hexane basis of ' +
+          'Tables 5 and 7 (§3.3.3.3.3). Enter both to apply Eq. (14) to the stored fluid.');
+      } else if (fluid.relieving_temp_C == null) {
+        notice(`Relieving vapour temperature not entered; ${(fireCase.T_K - PHYSICAL.C_TO_K).toFixed(1)} °C ` +
+          'has been used in Eq. (14). Enter the bubble point at the relieving pressure.');
+      }
+      if (fire.manual_wetted_m2 == null) {
+        if (fireCase.wetted_area_m2 === 0) {
+          notice(`No tank surface lies within ${FIRE.GRADE_LIMIT_M} m of grade, so the fire-case requirement is zero.`);
+        } else if (fireCase.limit_governs) {
+          notice(`The surface within ${FIRE.GRADE_LIMIT_M} m of grade exceeds the 55 %/75 % fraction and governs the ` +
+            'wetted area, as written in Table 5 note a. Use the manual wetted-area override if a different basis is justified.');
+        }
+        if (tank.shape === 'VERTICAL_CYLINDER' && tank.elevation_m > 0) {
+          notice('For a vertical tank supported above grade, part of the bottom area should be added to the wetted ' +
+            'area by engineering judgment (Table 5 note a). Use the manual wetted-area override to include it.');
+        }
+      }
+      if (fire.environmental_factor === 'INSULATED') {
+        notice('Insulation F-factor credit requires fire-resistant insulation over the wetted area that resists ' +
+          'dislodgment by fire-fighting equipment (Table 9 note a).');
+      }
+    }
+
+    if (tank.mawp_kpag > MAX_SCOPE_PRESSURE_KPA) {
+      warn(`MAWP (${tank.mawp_kpag.toFixed(1)} kPa / ${(tank.mawp_kpag * CONVERSIONS.KPA_TO_PSI).toFixed(1)} psig) ` +
+        'exceeds the API Std 2000 scope limit of 103.4 kPa (15 psig). Consult the applicable pressure vessel code.');
+    }
+
+    // Installed devices
+    const devices = actual ? actual.devices : [];
+    if (devices.length > 0) {
+      if (!devices.some(relievesOut)) {
+        warn('No installed device provides out-breathing (pressure) relief.');
+      } else if (!devices.some(d => relievesOut(d) && d.type !== 'EPRV')) {
+        warn('Only emergency relief valves (EPRV) provide pressure relief. EPRVs do not satisfy normal out-breathing requirements.');
+      }
+      if (!devices.some(relievesIn)) warn('No installed device provides inbreathing (vacuum) relief.');
+
+      devices.forEach((d, i) => {
+        const label = `Device #${i + 1} (${TYPE_LABELS[d.type] || d.type})`;
+        if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
+          if (!(d.pipe_diameter_m > 0)) warn(`${label}: pipe inner diameter not entered; capacity taken as zero.`);
+          else if (d.pipe_diameter_m < OPEN_VENT.MIN_PIPE_DIAM_M) warn(`${label}: pipe inner diameter is below 1 inch (25.4 mm); verify the input.`);
+          if (d.discharge_coefficient < OPEN_VENT.CD_MIN || d.discharge_coefficient > OPEN_VENT.CD_MAX) {
+            warn(`${label}: discharge coefficient Cd = ${d.discharge_coefficient} is outside the typical ` +
+              `${OPEN_VENT.CD_MIN}–${OPEN_VENT.CD_MAX} range; verify it for the fitting geometry.`);
+          }
+          return;
+        }
+        const checks = [
+          [relievesOut(d), d.rated_flow_outbreathing, d.set_pressure, tank.mawp_kpag, 'out-breathing', 'set pressure', 'MAWP'],
+          [relievesIn(d),  d.rated_flow_inbreathing,  d.set_vacuum,   tank.mawv_kpag, 'inbreathing',   'set vacuum',   'MAWV'],
+        ];
+        for (const [applies, flow, setPoint, limit, dir, setName, limitName] of checks) {
+          if (!applies) continue;
+          if (!(flow > 0)) warn(`${label}: rated ${dir} flow not entered; capacity taken as zero.`);
+          if (d.type === 'FREE_VENT') continue;
+          if (setPoint == null) warn(`${label}: ${setName} not entered; ${dir} capacity taken as zero.`);
+          else if (setPoint >= limit) {
+            warn(`${label}: ${setName} is at or above the tank ${limitName}, so the valve provides no ` +
+              `${dir} capacity at the tank's allowable ${limitName === 'MAWP' ? 'pressure' : 'vacuum'}.`);
+          }
+        }
+      });
+    }
+
+    if (atmDefaultUsed) {
+      notice(`One or more open vents were sized at the default allowable of ${OPEN_VENT.ATM_DEFAULT_ALLOWABLE_KPA} kPa ` +
+        '(≈ 2 in H₂O) because the tank MAWP and/or MAWV is 0. Enter the actual allowable pressure/vacuum to refine the capacity.');
+    }
+
+    out.push(...engine.generateArrestorWarnings(devices));
+    return out;
+  }
+
+  // --- Entry point ------------------------------------------------------------
+
+  function runCalculation(inputs) {
+    if (!inputs.meta.disclaimer_accepted) {
+      return { errors: ['Calculation cannot proceed until the engineering disclaimer is accepted.'], warnings: [] };
     }
 
     try {
-      const tank  = inputs.tank;
-      const fluid = inputs.fluid;
-      const env   = inputs.environment;
-      const opts  = inputs.calculation_options ?? {};
+      const s = toSI(inputs);
+      const errors = validate(s);
+      if (errors.length > 0) return { errors, warnings: [] };
 
-      // --- Convert inputs to SI ---
-      const volume_m3     = uc.toM3(tank.volume, us);
-      const mawp_kpag     = uc.toKpa(tank.mawp, us);           // gauge kPa
-      const mawv_kpag     = uc.toKpa(tank.mawv, us);           // gauge kPa
-      const dims_si       = uc.convertDimsToSI(tank.dimensions, us);
-      const elev_m        = uc.toMetres(tank.elevation_above_grade ?? 0, us);
+      const { us, method, tank } = s;
+      const normal   = calcNormalVenting(s);
+      const fireCase = s.fire.include ? calcFireCase(s) : null;
+      const emergencyOut = fireCase ? fireCase.emergency_out : 0;
 
-      const fill_m3hr     = uc.liquidFlowToM3hr(fluid.max_fill_rate, us);
-      const empty_m3hr    = uc.liquidFlowToM3hr(fluid.max_empty_rate, us);
-      const fp_C          = fluid.flash_point != null ? uc.toC(fluid.flash_point, us) : null;
-      const latent_J_kg   = fluid.latent_heat_of_vaporization != null
-        ? uc.toJkg(fluid.latent_heat_of_vaporization, us)
-        : null;
-      const temp_contents_C = fluid.normal_operating_temp != null
-        ? uc.toC(fluid.normal_operating_temp, us)
-        : 20;
-      const relieving_temp_C = fluid.relieving_vapor_temp != null
-        ? uc.toC(fluid.relieving_vapor_temp, us)
-        : temp_contents_C;
-
-      // Relieving pressure for open-vent capacity calcs (absolute kPa)
-      const relieving_P_kpaa = uc.gaugeToAbsKpa(mawp_kpag);
-
-      const env_si = env.insulation
-        ? { ...env, insulation: convertInsulationToSI(env.insulation, us) }
-        : { ...env };
-
-      const tank_si = {
-        shape:                 tank.shape,
-        dims:                  dims_si,
-        elevation_above_grade: elev_m,
-      };
-
-      // --- Thermal venting ---
-      // Annex A Table A.3 thermal method: latitude-independent; out-breathing
-      // factor is selected from the fluid's volatility.
-      const bare_thermal = engine.calcThermalVentingBare(volume_m3, fluid.is_volatile);
-      const thermal      = engine.applyInsulationFactor(bare_thermal, env_si);
-
-      // --- Operational venting ---
-      const operational_in = engine.calcOperationalInbreathing(empty_m3hr);
-      const { operational_out, vaporisation_component } =
-        engine.calcOperationalOutbreathing(fill_m3hr, fluid.is_volatile);
-
-      // --- Totals ---
-      const totals = engine.calcTotalNormalVenting(
-        thermal.thermal_in, operational_in,
-        thermal.thermal_out, operational_out,
-      );
-
-      // --- Emergency / fire case ---
-      let wetted_result     = null;
-      let heat_input_result = null;
-      let emergency_result  = null;
-
-      if (opts.include_emergency_fire_case !== false) {
-        const manualOverrideM2 = opts.manual_wetted_area_override != null
-          ? uc.toM2(opts.manual_wetted_area_override, us)
-          : null;
-
-        wetted_result = manualOverrideM2
-          ? {
-              wetted_area_m2:           manualOverrideM2,
-              exceeds_simplified_limit: false,
-              method:                   'Manual override provided by user',
-            }
-          : engine.calcWettedArea(tank_si);
-
-        heat_input_result = engine.calcFireHeatInput(
-          env_si,
-          wetted_result.wetted_area_m2,
-          temp_contents_C,
-          opts.credit_for_drainage     ?? false,
-          opts.credit_for_fireproofing ?? false,
-        );
-
-        if (latent_J_kg) {
-          emergency_result = engine.calcEmergencyOutbreathing(
-            heat_input_result.heat_input_W,
-            latent_J_kg,
-            fluid.molecular_weight,
-            relieving_temp_C,
-            relieving_P_kpaa,
-          );
-        } else {
-          errors.push(
-            'Emergency outbreathing requires latent heat of vaporisation and molecular weight. ' +
-            'Provide these values to complete the fire-case calculation.'
-          );
-        }
-      }
-
-      // --- Governing requirements ---
-      const governing = engine.calcGoverning(
-        totals.total_out,
-        emergency_result?.emergency_out_Nm3hr ?? null,
-        totals.total_in,
-      );
-
-      // --- Actual installed venting devices ---
-      let actual_venting_result = null;
-      let atm_open_vent_default_used = false;
-
-      if (inputs.devices && inputs.devices.length > 0) {
-        const flowToSI = (val) => val == null ? null : (us === 'US' ? uc.scfhToNm3hr(val) : val);
-        const T_relieving_K = relieving_temp_C + PHYSICAL.C_TO_K;
-        const T_ambient_K   = temp_contents_C  + PHYSICAL.C_TO_K;
-
-        const actual_devices_si = inputs.devices.map(d => {
-          const dev = {
-            ...d,
-            // Device set-pressures are gauge kPa once converted.
-            set_pressure:            d.set_pressure != null ? uc.toKpa(d.set_pressure, us) : null,
-            set_vacuum:              d.set_vacuum   != null ? uc.toKpa(d.set_vacuum, us)   : null,
-            rated_flow_outbreathing: flowToSI(d.rated_flow_outbreathing),
-            rated_flow_inbreathing:  flowToSI(d.rated_flow_inbreathing),
-          };
-
-          if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
-            const pipe_d_m = d.pipe_diameter != null ? uc.pipeDiamToM(d.pipe_diameter, us) : null;
-            const Cd       = d.discharge_coefficient ?? OPEN_V.DEFAULT_CD;
-            // Retained on the device for display/audit; the open-vent capacity
-            // itself is computed with AIR properties (see below).
-            const k_fluid  = d.specific_heat_ratio ?? fluid.specific_heat_ratio ?? null;
-            const Zi_fluid = d.compressibility_factor ?? fluid.compressibility_factor ?? 1.0;
-
-            dev.pipe_diameter_m        = pipe_d_m;
-            dev.discharge_coefficient  = Cd;
-            dev.specific_heat_ratio    = k_fluid;
-            dev.compressibility_factor = Zi_fluid;
-
-            // Open-vent (gooseneck) flows are air-equivalent for tanks at or
-            // below the standard's 49 °C basis (Annex D, Table D.1 / §D.9), so
-            // BOTH directions use AIR properties (symmetric in/out, no fluid
-            // M/k dependency).
-            //
-            // Open vents are sized at the tank's allowable pressure/vacuum.
-            // Atmospheric tanks legitimately have MAWP/MAWV = 0, so fall back to
-            // a standard allowable accumulation (OPEN_V.ATM_DEFAULT_ALLOWABLE_KPA)
-            // rather than returning zero flow.
-            const out_allow_kpag = (Number.isFinite(mawp_kpag) && mawp_kpag > 0)
-              ? mawp_kpag : OPEN_V.ATM_DEFAULT_ALLOWABLE_KPA;
-            const in_allow_kpag = (Number.isFinite(mawv_kpag) && mawv_kpag > 0)
-              ? mawv_kpag : OPEN_V.ATM_DEFAULT_ALLOWABLE_KPA;
-            if (out_allow_kpag !== mawp_kpag || in_allow_kpag !== mawv_kpag) {
-              atm_open_vent_default_used = true;
-            }
-            const vent_inlet_kpaa  = PHYSICAL.P_ATM_KPA + out_allow_kpag;
-            const vent_vacuum_kpaa = Math.max(PHYSICAL.P_ATM_KPA - in_allow_kpag, 0.1);
-
-            if ((d.direction === 'BOTH' || d.direction === 'OUTBREATHING')) {
-              dev.rated_flow_outbreathing = pipe_d_m
-                ? engine.calculateOpenVentCapacity(
-                    pipe_d_m, vent_inlet_kpaa, PHYSICAL.P_ATM_KPA,
-                    AIR.k, T_relieving_K, AIR.M, AIR.Zi, Cd,
-                  )
-                : 0;
-            }
-
-            if ((d.direction === 'BOTH' || d.direction === 'INBREATHING')) {
-              dev.rated_flow_inbreathing = pipe_d_m
-                ? engine.calculateOpenVentCapacity(
-                    pipe_d_m, PHYSICAL.P_ATM_KPA, vent_vacuum_kpaa,
-                    AIR.k, T_ambient_K, AIR.M, AIR.Zi, Cd,
-                  )
-                : 0;
-            }
-          }
-
-          // Flame arrestor descriptor (already in SI from app.js).
-          // We just ensure the dev object carries it forward unchanged.
-          if (d.flame_arrestor && d.flame_arrestor.type === 'FLAME_ARRESTOR') {
-            dev.flame_arrestor = { ...d.flame_arrestor };
-          }
-
-          return dev;
-        });
-
-        const anyArrestor = actual_devices_si.some(d =>
-          d.flame_arrestor && d.flame_arrestor.type === 'FLAME_ARRESTOR');
-
-        if (anyArrestor) {
-          actual_venting_result = engine.calcActualVentingWithArrestor(
-            actual_devices_si,
-            mawp_kpag,
-            mawv_kpag,
-            {
-              fluid: {
-                molecular_weight:        fluid.molecular_weight,
-                compressibility_factor:  fluid.compressibility_factor ?? 1.0,
-                relieving_temperature_C: relieving_temp_C,
-              },
-              relieving_pressure_kPa_abs: relieving_P_kpaa,
-              governing_out_Nm3hr:        governing.governing_out,
-            },
-          );
-        } else {
-          // Device comparison uses GAUGE pressure/vacuum — consistent with device set points.
-          actual_venting_result = engine.calcActualVenting(
-            actual_devices_si,
-            mawp_kpag,
-            mawv_kpag,
-          );
-        }
-      }
-
-      // --- Warnings ---
-      const enriched_inputs = {
-        ...inputs,
-        tank:    { ...tank,  volume_m3, mawp_kpa: mawp_kpag, mawv_kpa: mawv_kpag },
-        fluid:   { ...fluid, latent_heat_J_kg: latent_J_kg, flash_point_C: fp_C },
-        devices: actual_venting_result
-          ? actual_venting_result.evaluated_devices
-          : (inputs.devices || []),
-      };
-      const warnings = engine.generateWarnings(enriched_inputs, { wetted: wetted_result });
-
-      // Flame-arrestor warnings (additive; only non-empty when an arrestor is attached)
-      if (actual_venting_result && actual_venting_result.evaluated_devices && engine.generateArrestorWarnings) {
-        const fa_warnings = engine.generateArrestorWarnings(actual_venting_result.evaluated_devices);
-        warnings.push(...fa_warnings);
-      }
-
-      // Notice when an open vent was sized against the default atmospheric
-      // allowable because the tank MAWP/MAWV was 0 or not provided.
-      if (atm_open_vent_default_used) {
-        warnings.push({
-          severity: 'NOTICE',
-          message:
-            `One or more open vents were sized using the default atmospheric allowable of ` +
-            `${OPEN_V.ATM_DEFAULT_ALLOWABLE_KPA} kPa (≈ 2 in H₂O) because the tank MAWP and/or MAWV ` +
-            'is 0 or not provided. Enter the tank’s actual allowable pressure/vacuum to refine the capacity.',
+      let actual = null;
+      let atmDefaultUsed = false;
+      if (s.devices.length > 0) {
+        const converted = devicesToSI(s);
+        atmDefaultUsed = converted.atmDefaultUsed;
+        // Venting capacities are air-equivalent flows (Annex D.9), so the arrestor
+        // ΔP is evaluated with air at normal temperature and the relieving pressure.
+        actual = engine.calcActualVenting(converted.devices, tank.mawp_kpag, tank.mawv_kpag, {
+          molecular_weight:       AIR.M,
+          compressibility_factor: AIR.Zi,
+          temperature_C:          0,
+          pressure_kPa_abs:       PHYSICAL.P_ATM_KPA + tank.mawp_kpag,
         });
       }
 
-      // --- Output unit conversion ---
-      const toFlow = (nm3hr) => nm3hr != null ? uc.ventingFlowToOutput(nm3hr, us) : null;
-      const toArea = (m2)    => m2    != null ? uc.areaToOutput(m2, us)           : null;
-      const toHeat = (w)     => w     != null ? uc.heatToOutput(w, us)            : null;
+      const warnings = collectWarnings(s, fireCase, actual, atmDefaultUsed);
+
+      // --- Output in display units ---
+      const flow = (nm3hr) => round(uc.flowToOutput(nm3hr, us), 1);
+      const governingOut = Math.max(normal.total_out, emergencyOut);
+      const meta = inputs.meta;
 
       const outputs = {
         unit_system: us,
-        flow_unit:   flowLabel(us),
-        area_unit:   areaLabel(us),
-        heat_unit:   heatLabel(us),
+        flow_unit:   us === 'US' ? 'SCFH' : 'Nm³/h',
+        area_unit:   us === 'US' ? 'ft²' : 'm²',
+        heat_unit:   us === 'US' ? 'BTU/h' : 'W',
+        mass_unit:   us === 'US' ? 'lb/h' : 'kg/h',
+        project: {
+          tag_number:   meta.tag_number ?? null,
+          project_name: meta.project_name ?? null,
+          prepared_by:  meta.prepared_by ?? null,
+          fluid_name:   inputs.fluid?.name ?? null,
+        },
+        method,
+        method_label: METHOD_LABELS[method],
 
         normal_venting: {
-          thermal: {
-            inbreathing:       round(toFlow(thermal.thermal_in), 1),
-            outbreathing:      round(toFlow(thermal.thermal_out), 1),
-            insulation_factor: round(thermal.insulation_factor, 4),
-            latitude_zone:     env.latitude_zone,
-          },
-          operational: {
-            inbreathing:            round(toFlow(operational_in), 1),
-            outbreathing:           round(toFlow(operational_out), 1),
-            vaporisation_component: round(toFlow(vaporisation_component), 1),
-            is_volatile:            fluid.is_volatile,
-          },
-          totals: {
-            total_inbreathing:  round(toFlow(totals.total_in), 1),
-            total_outbreathing: round(toFlow(totals.total_out), 1),
-          },
+          is_volatile: normal.is_volatile,
+          thermal_in:  flow(normal.thermal_in),
+          thermal_out: flow(normal.thermal_out),
+          liquid_in:   flow(normal.liquid_in),
+          liquid_out:  flow(normal.liquid_out),
+          total_in:    flow(normal.total_in),
+          total_out:   flow(normal.total_out),
+          Y:           normal.Y ?? null,
+          C:           normal.C ?? null,
+          Ri:          round(normal.Ri, 4),
         },
 
-        emergency_venting: wetted_result ? {
-          wetted_area:                  round(toArea(wetted_result.wetted_area_m2), 1),
-          exceeds_simplified_limit:     wetted_result.exceeds_simplified_limit ?? false,
-          wetted_area_method:           wetted_result.method,
-          heat_input:                   heat_input_result ? round(toHeat(heat_input_result.heat_input_W), 0) : null,
-          heat_input_method:            heat_input_result?.method ?? null,
-          F_factor:                     heat_input_result?.F_used != null ? round(heat_input_result.F_used, 4) : null,
-          C_constant:                   heat_input_result?.C_used ?? null,
-          emergency_outbreathing:       emergency_result ? round(toFlow(emergency_result.emergency_out_Nm3hr), 1) : null,
-          emergency_outbreathing_Sm3hr: emergency_result ? round(emergency_result.emergency_out_Sm3hr, 1) : null,
-          vapour_mass_flow:             emergency_result ? round(emergency_result.vapour_mass_flow_kg_hr, 2) : null,
-          reference_conditions:         emergency_result?.reference_conditions ?? null,
+        emergency_venting: fireCase ? {
+          wetted_area:        round(uc.areaToOutput(fireCase.wetted_area_m2, us), 1),
+          wetted_area_method: fireCase.method,
+          heat_input:         round(uc.heatToOutput(fireCase.heat_input_W, us), 0),
+          F:                  round(fireCase.F, 4),
+          basis:              fireCase.basis,
+          required:           flow(fireCase.emergency_out),
+          vapour_mass_flow:   round(uc.massToOutput(fireCase.vapour_mass_flow_kg_hr, us), 1),
         } : null,
 
         governing: {
-          governing_outbreathing: round(toFlow(governing.governing_out), 1),
-          governing_inbreathing:  round(toFlow(governing.governing_in), 1),
-          emergency_governs:      governing.emergency_governs,
+          outbreathing:      flow(governingOut),
+          inbreathing:       flow(normal.total_in),
+          emergency_governs: emergencyOut > normal.total_out,
         },
 
-        actual_venting: actual_venting_result ? {
-          actual_normal_outbreathing:    round(toFlow(actual_venting_result.actual_normal_out), 1),
-          actual_emergency_outbreathing: round(toFlow(actual_venting_result.actual_emergency_out), 1),
-          actual_inbreathing:            round(toFlow(actual_venting_result.actual_in), 1),
+        actual_venting: actual ? {
+          normal_out:    flow(actual.normal_out),
+          emergency_out: flow(actual.emergency_out),
+          inbreathing:   flow(actual.inbreathing),
           adequacy: {
-            normal_out:    actual_venting_result.actual_normal_out    >= totals.total_out,
-            emergency_out: actual_venting_result.actual_emergency_out >= governing.governing_out,
-            inbreathing:   actual_venting_result.actual_in            >= governing.governing_in,
+            normal_out:    actual.normal_out >= normal.total_out,
+            emergency_out: fireCase ? actual.emergency_out >= fireCase.emergency_out : null,
+            inbreathing:   actual.inbreathing >= normal.total_in,
           },
-          devices: actual_venting_result.evaluated_devices.map(d => ({
-            id:        d.id,
+          devices: actual.devices.map(d => ({
             type:      d.type,
             direction: d.direction,
-            flow_out:  round(toFlow(d.calculated_flow_out), 1),
-            flow_in:   round(toFlow(d.calculated_flow_in),  1),
-            arrestor:  d.arrestor_result ? {
-              class_key:            d.arrestor_result.arrestor_class_key,
-              K:                    round(d.arrestor_result.K, 2),
-              diameter_mm:          round(d.arrestor_result.diameter_m * 1000, 1),
-              deltaP_mbar:          round(d.arrestor_result.deltaP_mbar, 2),
-              deltaP_inH2O:         round(d.arrestor_result.deltaP_inH2O, 2),
-              deltaP_kPa:           round(d.arrestor_result.deltaP_kPa, 3),
-              budget_pct:           round(d.arrestor_result.budget_pct, 1),
-              velocity_m_s:         round(d.arrestor_result.velocity_m_s, 2),
-              density_kg_m3:        round(d.arrestor_result.density_kg_m3, 4),
-              effective_flow:       round(toFlow(d.arrestor_result.effective_flow_Nm3hr), 1),
-              badge:                d.arrestor_result.badge,
-              flow_inadequate:      d.arrestor_result.flow_inadequate,
+            flow_out:  flow(d.flow_out),
+            flow_in:   flow(d.flow_in),
+            arrestor:  d.arrestor ? {
+              deltaP_mbar:    round(d.arrestor.deltaP_mbar, 2),
+              deltaP_inH2O:   round(d.arrestor.deltaP_inH2O, 2),
+              budget_pct:     round(d.arrestor.budget_pct, 1),
+              effective_flow: flow(d.arrestor.effective_flow_Nm3hr),
+              badge:          d.arrestor.badge,
             } : null,
           })),
         } : null,
       };
 
-      const intermediates = {
-        volume_m3:                round(volume_m3, 3),
-        mawp_kpa:                 round(mawp_kpag, 3),
-        mawv_kpa:                 round(mawv_kpag, 3),
-        fill_rate_m3hr:           round(fill_m3hr, 4),
-        empty_rate_m3hr:          round(empty_m3hr, 4),
-        flash_point_C:            fp_C != null ? round(fp_C, 2) : null,
-        latent_heat_J_kg:         latent_J_kg != null ? round(latent_J_kg, 0) : null,
-        relieving_pressure_kpa_a: round(relieving_P_kpaa, 3),
-        relieving_temp_C:         round(relieving_temp_C, 1),
-        thermal_bare_in_Nm3hr:    round(bare_thermal.thermal_in, 2),
-        thermal_bare_out_Nm3hr:   round(bare_thermal.thermal_out, 2),
-        insulation_factor:        round(thermal.insulation_factor, 4),
-        wetted_area_m2:           wetted_result ? round(wetted_result.wetted_area_m2, 2) : null,
-        heat_input_W:             heat_input_result ? round(heat_input_result.heat_input_W, 0) : null,
-      };
+      // SI audit trail: [label, value, unit]
+      const intermediates = [
+        ['Volume',                  round(tank.volume_m3, 3),       'm³'],
+        ['MAWP',                    round(tank.mawp_kpag, 3),       'kPa(g)'],
+        ['MAWV',                    round(tank.mawv_kpag, 3),       'kPa(g)'],
+        ['Fill rate',               round(s.fluid.fill_m3hr, 3),    'm³/h'],
+        ['Empty rate',              round(s.fluid.empty_m3hr, 3),   'm³/h'],
+        ['Flash point',             round(s.fluid.flash_point_C, 2), '°C'],
+        ['Thermal inbreathing',     round(normal.thermal_in, 2),    'Nm³/h'],
+        ['Thermal out-breathing',   round(normal.thermal_out, 2),   'Nm³/h'],
+        ['Liquid-movement inbreathing',   round(normal.liquid_in, 2),  'Nm³/h'],
+        ['Liquid-movement out-breathing', round(normal.liquid_out, 2), 'Nm³/h'],
+      ];
+      if (method === 'GENERAL') {
+        intermediates.push(['Y-factor (Table 1)', normal.Y, ''], ['C-factor (Table 2)', normal.C, ''],
+          ['Insulation reduction factor Rᵢ', round(normal.Ri, 4), '']);
+      }
+      if (fireCase) {
+        intermediates.push(
+          ['Wetted area A_TWS',             round(fireCase.wetted_area_m2, 2), 'm²'],
+          ['Heat input Q (Table 3)',        round(fireCase.heat_input_W, 0),   'W'],
+          ['Environmental factor F',        round(fireCase.F, 4),              ''],
+          ['Latent heat L',                 round(fireCase.L, 0),              'J/kg'],
+          ['Molecular weight M',            round(fireCase.M, 2),              ''],
+          ['Relieving temperature T',       round(fireCase.T_K, 2),            'K'],
+          ['Emergency venting (Eq. 14)',    round(fireCase.emergency_out, 1),  'Nm³/h'],
+        );
+      }
 
-      return { outputs, intermediates, warnings, errors };
-
+      return { outputs, intermediates, warnings, errors: [] };
     } catch (err) {
-      return {
-        errors: [err.message || String(err)],
-        warnings: [],
-      };
+      return { errors: [err.message || String(err)], warnings: [] };
     }
   }
 

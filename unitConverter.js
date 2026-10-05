@@ -1,97 +1,35 @@
 // ============================================================
 // unitConverter.js  (browser build)
-// Bidirectional unit conversion helpers.
+// Converts user inputs (SI or US) to SI, and SI results back to
+// the display unit system.
 // Depends on: constants.js (must be loaded first)
 // ============================================================
 
 'use strict';
 
 (function () {
-  const C       = window.API2000.CONVERSIONS;
-  const PHYSICAL = window.API2000.PHYSICAL;
+  const C = window.API2000.CONVERSIONS;
+  const isUS = (unitSystem) => unitSystem === 'US';
+  const scaleUS = (factor) => (value, unitSystem) => (isUS(unitSystem) ? value * factor : value);
 
-  // ─── VOLUME ─────────────────────────────────────────────────────────────────
-  const bblToM3 = v => v * C.BBL_TO_M3;
-  const m3ToBbl = v => v * C.M3_TO_BBL;
-  const toM3 = (value, unitSystem) =>
-    unitSystem === 'US' ? bblToM3(value) : value;
-
-  // ─── VOLUMETRIC FLOW ────────────────────────────────────────────────────────
-  const scfhToNm3hr = v => v * C.SCFH_TO_NM3HR;
-  const nm3hrToScfh = v => v * C.NM3HR_TO_SCFH;
-  const liquidFlowToM3hr = (rate, unitSystem) =>
-    unitSystem === 'US' ? rate * C.BBL_TO_M3 : rate;
-  const ventingFlowToOutput = (nm3hr, unitSystem) =>
-    unitSystem === 'US' ? nm3hrToScfh(nm3hr) : nm3hr;
-
-  // ─── AREA ───────────────────────────────────────────────────────────────────
-  const ft2ToM2 = a => a * C.FT2_TO_M2;
-  const m2ToFt2 = a => a * C.M2_TO_FT2;
-  const toM2 = (value, unitSystem) =>
-    unitSystem === 'US' ? ft2ToM2(value) : value;
-  const areaToOutput = (m2, unitSystem) =>
-    unitSystem === 'US' ? m2ToFt2(m2) : m2;
-
-  // ─── LENGTH ─────────────────────────────────────────────────────────────────
-  const ftToM = l => l * C.FT_TO_M;
-  const mToFt = l => l * C.M_TO_FT;
-  const toMetres = (value, unitSystem) =>
-    unitSystem === 'US' ? ftToM(value) : value;
-
-  // ─── PRESSURE ───────────────────────────────────────────────────────────────
-  const psiToKpa = p => p * C.PSI_TO_KPA;
-  const kpaToPsi = p => p * C.KPA_TO_PSI;
-  const toKpa = (value, unitSystem) =>
-    unitSystem === 'US' ? psiToKpa(value) : value;
-  const gaugeToAbsKpa = kpag => kpag + PHYSICAL.P_ATM_KPA;
-
-  // ─── TEMPERATURE ────────────────────────────────────────────────────────────
-  const fToC = t => (t - 32) / 1.8;
-  const toC = (value, unitSystem) =>
-    unitSystem === 'US' ? fToC(value) : value;
-
-  // ─── HEAT / ENTHALPY ───────────────────────────────────────────────────────
-  const toJkg = (value, unitSystem) =>
-    unitSystem === 'US' ? value * C.BTU_LB_TO_J_KG : value;
-  const heatToOutput = (watts, unitSystem) =>
-    unitSystem === 'US' ? watts * C.W_TO_BTU_HR : watts;
-
-  // ─── PIPE DIAMETER (small bore: inches ↔ mm → metres) ────────────────────
-  const inToM  = l => l * 0.0254;
-  const mmToM  = l => l * 0.001;
-  const pipeDiamToM = (value, unitSystem) =>
-    unitSystem === 'US' ? inToM(value) : mmToM(value);
-
-  // ─── INSULATION ─────────────────────────────────────────────────────────────
-  const insulThicknessToM = (value, unitSystem) =>
-    unitSystem === 'US' ? value * C.IN_TO_M : value;
-  const insulConductivityToSI = (value, unitSystem) =>
-    unitSystem === 'US' ? value * C.BTU_IN_HR_FT2_F_TO_W_M_K : value;
-  const insulHTCToSI = (value, unitSystem) =>
-    unitSystem === 'US' ? value * C.BTU_HR_FT2_F_TO_W_M2_K : value;
-
-  // ─── DIAMETER / DIMENSIONS ──────────────────────────────────────────────────
-  const convertDimsToSI = (dims, unitSystem) => {
-    if (!dims) return {};
-    const convert = v => (v != null ? toMetres(v, unitSystem) : null);
-    return {
-      diameter:          convert(dims.diameter),
-      height_or_length:  convert(dims.height_or_length),
-      cone_roof_angle:   dims.cone_roof_angle ?? dims.cone_roof_angle_deg,
-    };
-  };
-
-  // ─── EXPORT ─────────────────────────────────────────────────────────────────
   window.API2000.uc = {
-    bblToM3, m3ToBbl, toM3,
-    scfhToNm3hr, nm3hrToScfh, liquidFlowToM3hr, ventingFlowToOutput,
-    ft2ToM2, m2ToFt2, toM2, areaToOutput,
-    ftToM, mToFt, toMetres,
-    psiToKpa, kpaToPsi, toKpa, gaugeToAbsKpa,
-    fToC, toC,
-    toJkg, heatToOutput,
-    inToM, mmToM, pipeDiamToM,
-    insulThicknessToM, insulConductivityToSI, insulHTCToSI,
-    convertDimsToSI,
+    // --- Inputs to SI ---
+    toM3:                  scaleUS(C.BBL_TO_M3),        // BBL → m³ (also BPH → m³/h)
+    toMetres:              scaleUS(C.FT_TO_M),          // ft → m
+    toM2:                  scaleUS(C.FT2_TO_M2),        // ft² → m²
+    toKpa:                 scaleUS(C.PSI_TO_KPA),       // psi → kPa
+    toJkg:                 scaleUS(C.BTU_LB_TO_J_KG),   // BTU/lb → J/kg
+    toNm3hr:               scaleUS(C.SCF_TO_NM3),       // SCFH → Nm³/h
+    insulConductivityToSI: scaleUS(C.BTU_IN_HR_FT2_F_TO_W_M_K),
+    insulHTCToSI:          scaleUS(C.BTU_HR_FT2_F_TO_W_M2_K),
+    toC: (value, unitSystem) => (isUS(unitSystem) ? (value - 32) / 1.8 : value),
+    // Small-bore lengths are entered in inches (US) or millimetres (SI).
+    smallLengthToM: (value, unitSystem) => value * (isUS(unitSystem) ? C.IN_TO_M : C.MM_TO_M),
+
+    // --- SI results to display units ---
+    flowToOutput: (nm3hr, unitSystem) => (isUS(unitSystem) ? nm3hr / C.SCF_TO_NM3 : nm3hr),
+    areaToOutput: (m2, unitSystem) => (isUS(unitSystem) ? m2 / C.FT2_TO_M2 : m2),
+    heatToOutput: scaleUS(C.W_TO_BTU_HR),
+    massToOutput: scaleUS(C.KG_TO_LB),
   };
 })();
