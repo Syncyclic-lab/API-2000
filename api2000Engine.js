@@ -1,491 +1,246 @@
 // ============================================================
 // api2000Engine.js  (browser build)
-// Core API Std 2000 (7th Edition) calculation functions.
+// Core API Std 2000 (7th Edition) calculation functions. All
+// inputs and outputs are SI; flows are Nm³/h of air.
 // Depends on: constants.js (must be loaded first)
 // ============================================================
 
 'use strict';
 
 (function () {
-  const {
-    TABLE_A3_SI,
-    TABLE1_VOLUME_LIMITS_M3,
-    THERMAL,
-    FIRE_CASE,
-    OPERATIONAL,
-    PHYSICAL,
-    INSULATION,
-    OPEN_VENT,
-  } = window.API2000;
+  const { PHYSICAL, GENERAL_METHOD: GEN, ANNEX_A, FIRE } = window.API2000;
 
-  // --- INTERPOLATION -------------------------------------------------------
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
-  function logLogInterp(x, x0, y0, x1, y1) {
-    const lx  = Math.log(x);
-    const lx0 = Math.log(x0);
-    const lx1 = Math.log(x1);
-    const ly0 = Math.log(y0);
-    const ly1 = Math.log(y1);
-    const ly  = ly0 + (lx - lx0) * (ly1 - ly0) / (lx1 - lx0);
-    return Math.exp(ly);
+  // Linear interpolation on column `col` of a table sorted by column 0.
+  // Below the first row the value scales proportionally from the origin (the
+  // basis of Table A.3 for small tanks); above the last row the final segment
+  // is extended.
+  function interpolate(table, x, col) {
+    const first = table[0];
+    if (x <= first[0]) return first[col] * x / first[0];
+    let i = 1;
+    while (i < table.length - 1 && x > table[i][0]) i++;
+    const [x0, x1] = [table[i - 1][0], table[i][0]];
+    const [y0, y1] = [table[i - 1][col], table[i][col]];
+    return y0 + (x - x0) * (y1 - y0) / (x1 - x0);
   }
 
-  function tableInterp(table, volume, col) {
-    const n = table.length;
-    if (volume <= table[0][0]) {
-      return logLogInterp(volume, table[0][0], table[0][col], table[1][0], table[1][col]);
-    }
-    if (volume >= table[n - 1][0]) {
-      return logLogInterp(
-        volume,
-        table[n - 2][0], table[n - 2][col],
-        table[n - 1][0], table[n - 1][col],
-      );
-    }
-    let low = 0;
-    let high = n - 2;
+  // --- 1. NORMAL VENTING ---------------------------------------------------
 
-    while (low <= high) {
-      const mid = (low + high) >> 1;
-      const vMid = table[mid][0];
-      const vMid1 = table[mid + 1][0];
+  // Annex A, Table A.3. Out-breathing is col. 3 (flash point ≥ 37.8 °C) or
+  // equal to inbreathing (col. 4, flash point < 37.8 °C).
+  function calcThermalAnnexA(volumeM3, isVolatile) {
+    const thermal_in = interpolate(ANNEX_A.TABLE_A3, volumeM3, 1);
+    return {
+      thermal_in,
+      thermal_out: isVolatile ? thermal_in : interpolate(ANNEX_A.TABLE_A3, volumeM3, 2),
+    };
+  }
 
-      if (volume >= vMid && volume <= vMid1) {
-        return logLogInterp(
-          volume,
-          vMid, table[mid][col],
-          vMid1, table[mid + 1][col],
-        );
-      } else if (volume < vMid) {
-        high = mid - 1;
-      } else {
-        low = mid + 1;
+  // §3.3.2.3, Eq. (7) and Eq. (9) with Table 1 (Y) and Table 2 (C).
+  // An unknown average storage temperature uses the conservative ≥ 25 °C column.
+  function calcThermalGeneral(volumeM3, latitudeZone, vaporPressureClass, avgStorageTempC, Ri) {
+    const Y = GEN.Y[latitudeZone];
+    const cRow = GEN.C[latitudeZone];
+    if (Y == null || !cRow) throw new Error('Unknown latitude zone: ' + latitudeZone);
+    const cool = vaporPressureClass !== 'HIGHER'
+      && avgStorageTempC != null && avgStorageTempC < GEN.C_TEMP_THRESHOLD_C;
+    const C = cool ? cRow.cool : cRow.other;
+    return {
+      thermal_out: Y * Math.pow(volumeM3, 0.9) * Ri,
+      thermal_in:  C * Math.pow(volumeM3, 0.7) * Ri,
+      Y,
+      C,
+    };
+  }
+
+  // §3.3.2.4–3.3.2.5: insulation reduction factor R_i (SI inputs).
+  function calcInsulationReduction(env) {
+    switch (env.insulation_type) {
+      case 'FULLY_INSULATED':
+      case 'PARTIALLY_INSULATED': {
+        const h = env.h_inside ?? GEN.H_INSIDE_DEFAULT;
+        const R_in = 1 / (1 + h * env.thickness_m / env.conductivity);           // Eq. (11)
+        if (env.insulation_type === 'FULLY_INSULATED') return R_in;
+        const f = env.coverage_fraction;                                           // A_inp / A_TTS
+        return f * R_in + (1 - f);                                                 // Eq. (12)
       }
+      case 'DOUBLE_WALL':
+        return GEN.DOUBLE_WALL_BASE + (1 - GEN.DOUBLE_WALL_BASE) * env.outside_containment_fraction; // Eq. (13)
+      default:
+        return 1;
     }
-    throw new Error('tableInterp: could not bracket volume ' + volume);
   }
 
-  // --- 1. THERMAL VENTING --------------------------------------------------
-
-  // API 2000 Annex A, Table A.3 (simplified method, SI). Inbreathing is read
-  // directly from the table (latitude-independent); out-breathing is 60 % of
-  // inbreathing for non-volatile stocks (Table A.3 col. 3 / footnote c) and
-  // 100 % for volatile stocks (col. 4 / footnote d). Returns uninsulated
-  // (R_i = 1) rates in Nm³/hr of air; applyInsulationFactor() applies R_i after.
-  function calcThermalVentingBare(volumeM3, isVolatile) {
-    const inbreathing = tableInterp(TABLE_A3_SI, volumeM3, 1);
-    const out_factor  = isVolatile
-      ? THERMAL.OUT_FACTOR_VOLATILE
-      : THERMAL.OUT_FACTOR_NONVOLATILE;
+  // Liquid movement: §3.3.2.2 Eqs. (1), (3), (5) or Annex A Table A.1.
+  function calcLiquidMovement(method, fillM3hr, emptyM3hr, isVolatile) {
+    const f = method === 'ANNEX_A' ? ANNEX_A : GEN;
     return {
-      thermal_in:  inbreathing,
-      thermal_out: inbreathing * out_factor,
+      liquid_in:  emptyM3hr * f.EMPTY_FACTOR,
+      liquid_out: fillM3hr * (isVolatile ? f.FILL_FACTOR_VOLATILE : f.FILL_FACTOR_NONVOLATILE),
     };
   }
 
-  function applyInsulationFactor(bareRates, environment) {
-    const { insulation_type, insulation: ins } = environment;
-    if (insulation_type === 'UNINSULATED' || !ins) {
-      return { ...bareRates, insulation_factor: 1.0 };
-    }
-    const { thermal_conductivity: k, insulation_thickness: t, internal_heat_transfer_coeff: h_i } = ins;
-    const U_ins = 1 / (1 / h_i + t / k + 1 / INSULATION.H_OUT_W_M2_K);
-    const covered_fraction = insulation_type === 'PARTIALLY_INSULATED'
-      ? (ins.coverage_fraction ?? 1.0)
-      : 1.0;
-    const uncovered_fraction = 1 - covered_fraction;
-    const U_eff = covered_fraction * U_ins + uncovered_fraction * INSULATION.H_BARE_W_M2_K;
-    const insulation_factor = U_eff / INSULATION.H_BARE_W_M2_K;
+  // --- 2. EMERGENCY VENTING (FIRE EXPOSURE) --------------------------------
+
+  // Sphere / horizontal tank: the greater of a fraction of the total surface
+  // or the surface within 9.14 m of grade (Table 5, note a).
+  function greaterWettedArea(fraction, total, belowLimit) {
+    const byFraction = fraction * total;
+    const limitGoverns = belowLimit > byFraction;
     return {
-      thermal_in:  bareRates.thermal_in  * insulation_factor,
-      thermal_out: bareRates.thermal_out * insulation_factor,
-      insulation_factor,
+      wetted_area_m2: Math.max(byFraction, belowLimit),
+      limit_governs: limitGoverns,
+      method: `Greater of ${Math.round(fraction * 100)} % of total surface (${byFraction.toFixed(1)} m²) and ` +
+        `surface within ${FIRE.GRADE_LIMIT_M} m of grade (${belowLimit.toFixed(1)} m²)`,
     };
   }
 
-  // --- 2. OPERATIONAL VENTING ----------------------------------------------
-
-  function calcOperationalInbreathing(emptyRateM3hr) {
-    return emptyRateM3hr * OPERATIONAL.INBREATHING_FACTOR;
-  }
-
-  function calcOperationalOutbreathing(fillRateM3hr, isVolatile) {
-    const multiplier = isVolatile
-      ? OPERATIONAL.VOLATILE_OUTBREATHING_FACTOR
-      : OPERATIONAL.NON_VOLATILE_OUTBREATHING_FACTOR;
-    const operational_out = fillRateM3hr * multiplier;
-    const vaporisation_component = isVolatile
-      ? fillRateM3hr * (OPERATIONAL.VOLATILE_OUTBREATHING_FACTOR - OPERATIONAL.NON_VOLATILE_OUTBREATHING_FACTOR)
-      : 0;
-    return { operational_out, vaporisation_component };
-  }
-
-  // --- 3. WETTED AREA ------------------------------------------------------
-
-  function calcWettedArea(tank) {
-    const { shape, dims = {}, elevation_above_grade = 0 } = tank;
-    const { diameter: D, height_or_length: H } = dims;
-    const GRADE_LIMIT = FIRE_CASE.GRADE_LIMIT_M;
-    if (!D) throw new Error('Tank diameter is required for wetted area calculation.');
+  // Wetted surface area A_TWS per Table 5, note a. Horizontal tanks assume flat heads.
+  function calcWettedArea(shape, diameterM, lengthM, elevationM = 0) {
+    if (!(diameterM > 0)) throw new Error('Tank diameter is required to calculate the wetted area.');
+    const D = diameterM;
     const R = D / 2;
-    const limit_above_base = Math.max(0, GRADE_LIMIT - elevation_above_grade);
-    let raw_area_m2 = 0;
-    let method = '';
+    const limitAboveBottom = FIRE.GRADE_LIMIT_M - elevationM;
 
     switch (shape) {
       case 'VERTICAL_CYLINDER': {
-        if (!H) throw new Error('Tank height is required for a vertical cylinder.');
-        const wetted_height = Math.min(H, limit_above_base);
-        raw_area_m2 = Math.PI * D * wetted_height;
-        method = `Vertical cylinder shell: π × ${D.toFixed(2)} m × ${wetted_height.toFixed(2)} m`;
-        break;
+        if (!(lengthM > 0)) throw new Error('Tank height is required for a vertical cylinder.');
+        const h = clamp(limitAboveBottom, 0, lengthM);
+        return {
+          wetted_area_m2: Math.PI * D * h,
+          limit_governs: false,
+          method: `Shell within ${FIRE.GRADE_LIMIT_M} m of grade: π × ${D.toFixed(2)} m × ${h.toFixed(2)} m`,
+        };
       }
       case 'HORIZONTAL_CYLINDER': {
-        if (!H) throw new Error('Tank length is required for a horizontal cylinder.');
-        const tank_top_elev    = elevation_above_grade + D;
-        const tank_centre_elev = elevation_above_grade + R;
-        let wetted_angle_rad;
-        if (GRADE_LIMIT >= tank_top_elev) {
-          wetted_angle_rad = 2 * Math.PI;
-        } else if (GRADE_LIMIT <= elevation_above_grade) {
-          wetted_angle_rad = 0;
-        } else {
-          const h_above_centre = GRADE_LIMIT - tank_centre_elev;
-          const half_angle = Math.acos(Math.max(-1, Math.min(1, h_above_centre / R)));
-          wetted_angle_rad = 2 * (Math.PI - half_angle);
-        }
-        const shell_area = wetted_angle_rad * R * H;
-        const head_area  = 0.5 * R * R * (wetted_angle_rad - Math.sin(wetted_angle_rad));
-        raw_area_m2 = shell_area + head_area;
-        method = 'Horizontal cylinder — arc-weighted shell + heads';
-        break;
+        if (!(lengthM > 0)) throw new Error('Tank length is required for a horizontal cylinder.');
+        const total = Math.PI * D * lengthM + 2 * Math.PI * R * R;
+        // Central angle of the circumference lying below the 9.14 m limit.
+        const theta = 2 * Math.acos(1 - clamp(limitAboveBottom, 0, D) / R);
+        const belowLimit = theta * R * lengthM + R * R * (theta - Math.sin(theta));
+        return greaterWettedArea(FIRE.HORIZONTAL_FRACTION, total, belowLimit);
       }
       case 'SPHERE': {
-        const sphere_bottom_elev = elevation_above_grade;
-        const sphere_top_elev    = elevation_above_grade + D;
-        const wetted_top_elev    = Math.min(sphere_top_elev, GRADE_LIMIT);
-        const cap_height         = Math.max(0, wetted_top_elev - sphere_bottom_elev);
-        raw_area_m2 = 2 * Math.PI * R * cap_height;
-        method = `Sphere cap: 2π × ${R.toFixed(2)} m × ${cap_height.toFixed(2)} m`;
-        break;
+        const total = Math.PI * D * D;
+        const belowLimit = 2 * Math.PI * R * clamp(limitAboveBottom, 0, D);
+        return greaterWettedArea(FIRE.SPHERE_FRACTION, total, belowLimit);
       }
       default:
         throw new Error('Unknown tank shape: ' + shape);
     }
-
-    return {
-      wetted_area_m2:           raw_area_m2,
-      exceeds_simplified_limit: raw_area_m2 > FIRE_CASE.MAX_WETTED_AREA_M2,
-      method,
-    };
   }
 
-  // --- 4. FIRE-CASE HEAT INPUT ---------------------------------------------
-
-  function calcFireHeatInputBare(wettedAreaM2, drainageCredit, fireproofingCredit) {
-    const C_val = drainageCredit ? FIRE_CASE.DRAINAGE_CREDIT : FIRE_CASE.NO_CREDIT;
-    const F_eff = fireproofingCredit ? FIRE_CASE.F_BARE * FIRE_CASE.FIREPROOFING_FACTOR : FIRE_CASE.F_BARE;
-    const heat_input_W = C_val * F_eff * Math.pow(wettedAreaM2, FIRE_CASE.exponent);
-    return { heat_input_W, C_used: C_val, F_used: F_eff, method: 'bare_formula' };
-  }
-
-  function calcFireHeatInputInsulated(wettedAreaM2, insulation, T_contents_C) {
-    const { thermal_conductivity: k, insulation_thickness: t } = insulation;
-    const dT = PHYSICAL.T_FIRE_SURFACE_C - T_contents_C;
-    const heat_input_W = (k / t) * wettedAreaM2 * dT;
-    return { heat_input_W, C_used: null, F_used: null, method: 'insulated_conduction' };
-  }
-
-  function calcFireHeatInput(environment, wettedAreaM2, T_contents_C, drainageCredit, fireproofingCredit) {
-    const isInsulated = environment.insulation_type !== 'UNINSULATED' && environment.insulation;
-    if (isInsulated) {
-      return calcFireHeatInputInsulated(wettedAreaM2, environment.insulation, T_contents_C);
+  // Table 3 — heat input Q (W) from wetted area (m²) and design pressure (kPa g).
+  function calcFireHeatInput(wettedAreaM2, designPressureKpag) {
+    if (wettedAreaM2 < FIRE.LARGE_AREA_M2) {
+      const [, coeff, exponent] = FIRE.HEAT_INPUT_BANDS.find(([maxArea]) => wettedAreaM2 < maxArea);
+      return coeff * Math.pow(wettedAreaM2, exponent);
     }
-    return calcFireHeatInputBare(wettedAreaM2, drainageCredit, fireproofingCredit);
+    return designPressureKpag > FIRE.LOW_PRESSURE_LIMIT_KPA
+      ? FIRE.LARGE_AREA_COEFF * Math.pow(wettedAreaM2, FIRE.LARGE_AREA_EXPONENT)
+      : FIRE.LARGE_AREA_LOW_P_Q_W;
   }
 
-  // --- 5. EMERGENCY OUTBREATHING (FIRE CASE) -------------------------------
-
-  function calcEmergencyOutbreathing(heatInputW, latentHeatJkg, molecularWeight, relievingTempC, relievingPressureKpa) {
-    if (!latentHeatJkg || latentHeatJkg <= 0) {
-      throw new Error('Latent heat of vaporization is required for emergency venting calculation.');
+  // Table 9 — environmental factor F. Insulated tanks use the note b basis
+  // with the actual insulation conductance (λ / thickness).
+  function calcEnvironmentalFactor(option, { thickness_m, conductivity, custom } = {}) {
+    switch (option) {
+      case 'INSULATED':
+        return Math.min(1, (conductivity / thickness_m) * FIRE.INSULATION_DT_K / FIRE.INSULATION_HEAT_FLUX_W_M2);
+      case 'CUSTOM':
+        return custom;
+      default:
+        return FIRE.ENV_FACTORS[option] ?? 1;
     }
-    if (!molecularWeight || molecularWeight <= 0) {
-      throw new Error('Molecular weight is required for emergency venting calculation.');
-    }
-    const T_relieve_K       = (relievingTempC ?? 20) + PHYSICAL.C_TO_K;
-    // API 2000 metric equivalent-air formula: q_a = 906.6 * (Q/L) * sqrt(T/M)
-    const nm3hr_std         = 906.6 * (heatInputW / latentHeatJkg) * Math.sqrt(T_relieve_K / molecularWeight);
-    const sm3hr_std         = nm3hr_std * (PHYSICAL.MOLAR_VOL_SM3_KGMOL / PHYSICAL.MOLAR_VOL_NM3_KGMOL);
-    const heatInputJ_hr     = heatInputW * PHYSICAL.SECONDS_PER_HOUR;
-    const mass_flow_kg_hr   = heatInputJ_hr / latentHeatJkg;
-    const Q_actual_m3hr     = nm3hr_std * (T_relieve_K / PHYSICAL.T_STD_SI) * (PHYSICAL.P_ATM_KPA / relievingPressureKpa);
+  }
+
+  // Eq. (14): required emergency venting, Nm³/h of air.
+  function calcEmergencyVenting(heatInputW, F, latentHeatJkg, molecularWeight, relievingTempK) {
+    const vapour_kg_s = heatInputW * F / latentHeatJkg;   // Eq. (D.40)
     return {
-      emergency_out_Nm3hr:       nm3hr_std,
-      emergency_out_Sm3hr:       sm3hr_std,
-      emergency_out_actual_m3hr: Q_actual_m3hr,
-      vapour_mass_flow_kg_hr:    mass_flow_kg_hr,
-      reference_conditions:      'Normal: 0 °C, 101.325 kPa (Nm³/hr)',
+      emergency_out: FIRE.EQ14_COEFF * vapour_kg_s * Math.sqrt(relievingTempK / molecularWeight),
+      vapour_mass_flow_kg_hr: vapour_kg_s * PHYSICAL.SECONDS_PER_HOUR,
     };
   }
 
-  // --- 6. TOTAL NORMAL VENTING ---------------------------------------------
+  // --- 3. INSTALLED VENTING DEVICES ----------------------------------------
 
-  function calcTotalNormalVenting(thermalIn, operIn, thermalOut, operOut) {
-    return {
-      total_in:  thermalIn  + operIn,
-      total_out: thermalOut + operOut,
-    };
+  // Isentropic nozzle flow of an ideal gas (Annex D, Eq. D.23), as Nm³/h.
+  // When p_out/p_in is below the critical ratio the flow is choked and the
+  // flow function is evaluated at the critical ratio.
+  function calculateOpenVentCapacity(diameterM, pInKpa, pOutKpa, k, T_in_K, M, Z = 1, Cd = 1) {
+    if (!(diameterM > 0 && pOutKpa > 0 && pInKpa > pOutKpa && k > 1 && T_in_K > 0 && M > 0)) return 0;
+    const area = Math.PI * diameterM * diameterM / 4;
+    const r = Math.max(pOutKpa / pInKpa, Math.pow(2 / (k + 1), k / (k - 1)));
+    const flowFunction = (k / (k - 1)) * (Math.pow(r, 2 / k) - Math.pow(r, (k + 1) / k));
+    const massFlow = Cd * area * pInKpa * 1000 * Math.sqrt(2 * M / (Z * PHYSICAL.R * T_in_K) * flowFunction);
+    return massFlow / M * PHYSICAL.MOLAR_VOL_NM3 * PHYSICAL.SECONDS_PER_HOUR;
   }
 
-  // --- 7. GOVERNING REQUIREMENTS -------------------------------------------
-
-  function calcGoverning(total_out_Nm3hr, emergency_out_Nm3hr, total_in_Nm3hr) {
-    const governing_out = Math.max(total_out_Nm3hr, emergency_out_Nm3hr ?? 0);
-    return {
-      governing_out,
-      governing_in:      total_in_Nm3hr,
-      emergency_governs: (emergency_out_Nm3hr ?? 0) > total_out_Nm3hr,
-    };
-  }
-
-  // --- 8. OPEN VENT CAPACITY (API 2000 Eq. 25, SI) -------------------------
-
-  function calculateOpenVentCapacity(diameter_m, p_inlet_kpa, p_outlet_kpa, k, T_inlet_K, M, Zi, Cd) {
-    if (!diameter_m || !p_inlet_kpa || !p_outlet_kpa || !k || !T_inlet_K || !M) return 0;
-    if (p_outlet_kpa >= p_inlet_kpa) return 0;
-
-    const A_m2 = Math.PI * Math.pow(diameter_m / 2, 2);
-    const P1   = p_inlet_kpa * 1000;
-    const P2   = p_outlet_kpa * 1000;
-
-    const r      = P2 / P1;
-    const r_crit = Math.pow(2 / (k + 1), k / (k - 1));
-
-    const Fk = (r <= r_crit)
-      ? Math.sqrt(k * Math.pow(2 / (k + 1), (k + 1) / (k - 1)))
-      : Math.sqrt((k / (k - 1)) * (Math.pow(r, 2 / k) - Math.pow(r, (k + 1) / k)));
-
-    const m_dot = Cd * A_m2 * P1 * Math.sqrt(2 * M / (Zi * PHYSICAL.R_SI * T_inlet_K)) * Fk;
-    return (m_dot / M) * PHYSICAL.MOLAR_VOL_NM3_KGMOL * PHYSICAL.SECONDS_PER_HOUR;
-  }
-
-  // --- 9. ACTUAL VENTING DEVICES -------------------------------------------
-
+  // Valve capacity at a given tank pressure (all gauge kPa): zero below the set
+  // point, rated flow at set × (1 + overpressure), linear partial lift between.
   function calcDeviceFlow(setPressure, ratedFlow, overpressurePct, tankPressure) {
-    if (setPressure == null || ratedFlow == null || tankPressure == null) return 0;
-    if (tankPressure <= setPressure) return 0;
-    const op = overpressurePct ?? 0;
-    const ratedPressure = setPressure * (1 + op / 100);
-    if (ratedPressure === setPressure) {
-      return tankPressure >= setPressure ? ratedFlow : 0;
-    }
+    if (setPressure == null || !(ratedFlow > 0) || tankPressure == null || tankPressure <= setPressure) return 0;
+    const ratedPressure = setPressure * (1 + (overpressurePct ?? 0) / 100);
     if (tankPressure >= ratedPressure) return ratedFlow;
-    const partialLiftRatio = (tankPressure - setPressure) / (ratedPressure - setPressure);
-    return ratedFlow * partialLiftRatio;
+    return ratedFlow * (tankPressure - setPressure) / (ratedPressure - setPressure);
   }
 
-  // NOTE: device set pressures/vacuums and the tank relieving pressure/vacuum
-  // must all be passed as GAUGE kPa. The caller is responsible for consistency.
-  function calcActualVenting(devices, relieving_pressure_kpag, relieving_vacuum_kpag) {
-    let actual_normal_out    = 0;
-    let actual_emergency_out = 0;
-    let actual_in            = 0;
+  // Evaluates every device at the tank's allowable pressure and vacuum (gauge kPa).
+  // Normal out-breathing excludes EPRVs; emergency out-breathing includes every
+  // pressure-relieving device (§3.3.3.3.5). Devices carrying a flame arrestor are
+  // evaluated by flameArrestor.js using `arrestorContext`.
+  function calcActualVenting(devices, relievingPressureKpag, relievingVacuumKpag, arrestorContext) {
+    let normal_out = 0;
+    let emergency_out = 0;
+    let inbreathing = 0;
 
-    const evaluated_devices = devices.map(dev => {
+    const evaluated = devices.map(dev => {
       let flow_out = 0;
-      let flow_in  = 0;
+      let flow_in = 0;
+      let arrestor = null;
 
-      if (dev.direction === 'BOTH' || dev.direction === 'OUTBREATHING') {
-        flow_out = dev.type === 'FREE_VENT'
-          ? (dev.rated_flow_outbreathing || 0)
-          : calcDeviceFlow(
-              dev.set_pressure,
-              dev.rated_flow_outbreathing,
-              dev.rated_overpressure_pct,
-              relieving_pressure_kpag,
-            );
-
-        if (dev.type === 'PVRV' || dev.type === 'FREE_VENT') {
-          actual_normal_out    += flow_out;
-          actual_emergency_out += flow_out;
-        } else if (dev.type === 'EPRV') {
-          actual_emergency_out += flow_out;
+      if (dev.direction !== 'INBREATHING') {
+        if (dev.flame_arrestor) {
+          ({ flow_out, arrestor } = engine.calcArrestedOutflow(dev, relievingPressureKpag, arrestorContext));
+        } else {
+          flow_out = dev.type === 'FREE_VENT'
+            ? (dev.rated_flow_outbreathing || 0)
+            : calcDeviceFlow(dev.set_pressure, dev.rated_flow_outbreathing, dev.rated_overpressure_pct, relievingPressureKpag);
         }
+        emergency_out += flow_out;
+        if (dev.type !== 'EPRV') normal_out += flow_out;
       }
 
-      if (dev.direction === 'BOTH' || dev.direction === 'INBREATHING') {
+      if (dev.direction !== 'OUTBREATHING') {
         flow_in = dev.type === 'FREE_VENT'
           ? (dev.rated_flow_inbreathing || 0)
-          : calcDeviceFlow(
-              dev.set_vacuum,
-              dev.rated_flow_inbreathing,
-              dev.rated_overpressure_pct,
-              relieving_vacuum_kpag,
-            );
-        actual_in += flow_in;
+          : calcDeviceFlow(dev.set_vacuum, dev.rated_flow_inbreathing, dev.rated_overpressure_pct, relievingVacuumKpag);
+        inbreathing += flow_in;
       }
 
-      return { ...dev, calculated_flow_out: flow_out, calculated_flow_in: flow_in };
+      return { ...dev, flow_out, flow_in, arrestor };
     });
 
-    return { actual_normal_out, actual_emergency_out, actual_in, evaluated_devices };
-  }
-
-  // --- 10. WARNING ACCUMULATOR ---------------------------------------------
-
-  const API2000_MAWP_SCOPE_LIMIT_KPA = 103.4;
-
-  function generateWarnings(inputs, intermediates) {
-    const warnings = [];
-    const push = (severity, message) => warnings.push({ severity, message });
-    const { environment, fluid, abnormal_scenarios, calculation_options: opts } = inputs;
-
-    if (environment.insulation_type !== 'UNINSULATED' && !environment.insulation) {
-      push('WARNING',
-        'Insulation type is not UNINSULATED but insulation properties are missing. ' +
-        'Calculation has defaulted to UNINSULATED per API 2000 §4.4.2.');
-    }
-
-    if (intermediates.wetted?.exceeds_simplified_limit) {
-      push('NOTICE',
-        `Wetted area (${intermediates.wetted.wetted_area_m2.toFixed(1)} m²) exceeds the ` +
-        `API 2000 simplified table maximum of ${FIRE_CASE.MAX_WETTED_AREA_M2} m² (2,800 ft²). ` +
-        'The general formula Q = C × F × A^0.82 is applied using the full uncapped area per §7.2.1.');
-    }
-
-    if (fluid.is_volatile && fluid.flash_point_C != null && fluid.flash_point_C < 0) {
-      push('WARNING',
-        'Flash point is < 0 °C. The liquid is highly volatile and may be near or above its ' +
-        'atmospheric bubble point depending on storage temperature. Verify relieving temperature and latent heat inputs.');
-    }
-
-    if (inputs.tank.volume_m3 > TABLE1_VOLUME_LIMITS_M3.MAX) {
-      push('NOTICE',
-        `Tank volume (${inputs.tank.volume_m3.toFixed(0)} m³) exceeds the ` +
-        `${TABLE1_VOLUME_LIMITS_M3.MAX.toLocaleString()} m³ upper limit of API 2000 Annex A Table A.3. ` +
-        'Log-log extrapolation is applied; verify with the §3.3.2 formula method for very large tanks.');
-    }
-
-    if (inputs.tank.volume_m3 < TABLE1_VOLUME_LIMITS_M3.MIN) {
-      push('NOTICE',
-        `Tank volume (${inputs.tank.volume_m3.toFixed(2)} m³) is below the ` +
-        `${TABLE1_VOLUME_LIMITS_M3.MIN} m³ lower bound of API 2000 Annex A Table A.3. ` +
-        'Downward log-log extrapolation is applied; results should be verified by the designer for very small tanks.');
-    }
-
-    const activeAbnormal = Object.entries(abnormal_scenarios)
-      .filter(([, v]) => v === true)
-      .map(([k]) => k.replace(/_/g, ' '));
-    if (activeAbnormal.length > 0) {
-      push('NOTICE',
-        'The following abnormal scenarios are selected and are NOT included in the ' +
-        `calculated results: ${activeAbnormal.join(', ')}. ` +
-        'Additional venting loads from these scenarios are the responsibility of the ' +
-        'tank designer/owner per API 2000 §4.2.');
-    }
-
-    if (!opts?.include_emergency_fire_case) {
-      push('NOTICE',
-        'Emergency fire-case venting is excluded from this calculation. ' +
-        'Ensure this is appropriate for the installation and regulatory jurisdiction.');
-    }
-
-    if (opts?.include_emergency_fire_case && !fluid.latent_heat_J_kg) {
-      push('WARNING',
-        'Latent heat of vaporisation is not provided. ' +
-        'Emergency outbreathing cannot be calculated without this value.');
-    }
-
-    if (inputs.tank.mawp_kpa > API2000_MAWP_SCOPE_LIMIT_KPA) {
-      push('WARNING',
-        `MAWP (${inputs.tank.mawp_kpa.toFixed(1)} kPa / ` +
-        `${(inputs.tank.mawp_kpa * window.API2000.CONVERSIONS.KPA_TO_PSI).toFixed(1)} psig) exceeds the ` +
-        'API Std 2000 scope limit of 103.4 kPa (15 psig). ' +
-        'This tank may fall outside the scope of API 2000; consult the ' +
-        'applicable pressure vessel code (e.g. ASME Section VIII).');
-    }
-
-    const devices = inputs.devices;
-    if (devices && devices.length > 0) {
-      const { mawp_kpa, mawv_kpa } = inputs.tank;
-
-      const hasNormalOut       = devices.some(d => (d.type === 'PVRV' || d.type === 'FREE_VENT') && (d.direction === 'BOTH' || d.direction === 'OUTBREATHING'));
-      const hasEmergencyOnly   = devices.some(d => d.type === 'EPRV');
-      const hasAnyOutbreathing = devices.some(d => d.direction === 'BOTH' || d.direction === 'OUTBREATHING');
-      const hasAnyInbreathing  = devices.some(d => d.direction === 'BOTH' || d.direction === 'INBREATHING');
-
-      if (hasEmergencyOnly && !hasNormalOut) {
-        push('WARNING',
-          'An Emergency Relief Valve (EPRV) is installed but no Normal PVRV or Free Vent ' +
-          'provides outbreathing for normal operating conditions. ' +
-          'EPRVs only relieve during emergencies and do not satisfy normal venting ' +
-          'requirements per API 2000 §4.3.2.');
-      }
-      if (!hasAnyOutbreathing) {
-        push('WARNING',
-          'No installed devices provide outbreathing (pressure relief). ' +
-          'The tank has no capacity for thermal or operational outbreathing loads.');
-      }
-      if (!hasAnyInbreathing) {
-        push('WARNING',
-          'No installed devices provide inbreathing (vacuum relief). ' +
-          'The tank has no capacity for thermal or operational inbreathing loads.');
-      }
-
-      devices.forEach((d, i) => {
-        const label = `Device #${i + 1} (${d.type})`;
-
-        if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
-          if (d.discharge_coefficient != null &&
-              (d.discharge_coefficient < OPEN_VENT.CD_MIN || d.discharge_coefficient > OPEN_VENT.CD_MAX)) {
-            push('WARNING',
-              `${label} discharge coefficient (Cd = ${d.discharge_coefficient}) is outside the ` +
-              `typical range of ${OPEN_VENT.CD_MIN}–${OPEN_VENT.CD_MAX}. ` +
-              'Verify the Cd value for your specific fitting geometry.');
-          }
-          if (d.pipe_diameter_m != null && d.pipe_diameter_m < OPEN_VENT.MIN_PIPE_DIAM_M) {
-            push('WARNING',
-              `${label} pipe inner diameter appears very small (< 1 inch / 25.4 mm). ` +
-              'Verify the input value.');
-          }
-        }
-
-        if (d.type === 'PVRV' && d.set_pressure != null && mawp_kpa != null && d.set_pressure > mawp_kpa * 1.1) {
-          push('WARNING',
-            `${label} set pressure significantly exceeds MAWP. ` +
-            'The valve may not open at the tank relieving conditions.');
-        }
-        if (d.type === 'PVRV' && d.set_vacuum != null && mawv_kpa != null && d.set_vacuum > mawv_kpa * 1.1) {
-          push('WARNING',
-            `${label} set vacuum significantly exceeds MAWV. ` +
-            'The valve may not open at the tank vacuum conditions.');
-        }
-      });
-    }
-
-    return warnings;
+    return { normal_out, emergency_out, inbreathing, devices: evaluated };
   }
 
   // --- EXPORT --------------------------------------------------------------
 
-  window.API2000.engine = {
-    logLogInterp,
-    tableInterp,
-    calcThermalVentingBare,
-    applyInsulationFactor,
-    calcOperationalInbreathing,
-    calcOperationalOutbreathing,
+  const engine = window.API2000.engine = {
+    interpolate,
+    calcThermalAnnexA,
+    calcThermalGeneral,
+    calcInsulationReduction,
+    calcLiquidMovement,
     calcWettedArea,
-    calcFireHeatInputBare,
-    calcFireHeatInputInsulated,
     calcFireHeatInput,
-    calcEmergencyOutbreathing,
-    calcTotalNormalVenting,
-    calcGoverning,
+    calcEnvironmentalFactor,
+    calcEmergencyVenting,
     calculateOpenVentCapacity,
     calcDeviceFlow,
     calcActualVenting,
-    generateWarnings,
   };
 })();

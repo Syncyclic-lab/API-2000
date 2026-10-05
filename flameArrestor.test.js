@@ -133,3 +133,52 @@ describe('evaluateFlameArrestor', () => {
     expect(zeroD.deltaP_Pa).toBe(0);
   });
 });
+
+describe('calcArrestedOutflow', () => {
+  const ctx = { molecular_weight: 28.96, compressibility_factor: 1, temperature_C: 0, pressure_kPa_abs: 115.325 };
+  const pvrv = (K, D, rated) => ({
+    type: 'PVRV', direction: 'OUTBREATHING', set_pressure: 7, rated_overpressure_pct: 100,
+    rated_flow_outbreathing: rated, flame_arrestor: { K, diameter_m: D },
+  });
+  // Self-consistency: the valve flow at (P − ΔP(flow)) equals the flow.
+  const residual = (dev, flow) => {
+    const dp = engine.evaluateFlameArrestor({
+      K: dev.flame_arrestor.K, diameter_m: dev.flame_arrestor.diameter_m, flow_Nm3hr: flow,
+      molecular_weight: 28.96, relieving_temperature_C: 0, relieving_pressure_kPa_abs: 115.325,
+    }).deltaP_kPa;
+    return engine.calcDeviceFlow(7, dev.rated_flow_outbreathing, 100, 14 - dp) - flow;
+  };
+
+  it('reduces valve flow slightly for a small arrestor ΔP', () => {
+    const dev = pvrv(1.5, 0.1016, 500);
+    const { flow_out, arrestor } = engine.calcArrestedOutflow(dev, 14, ctx);
+    expect(flow_out).toBeLessThan(500);
+    expect(flow_out).toBeGreaterThan(450);
+    expect(Math.abs(residual(dev, flow_out))).toBeLessThan(0.01);
+    expect(arrestor.badge).toBe('PASS');
+  });
+
+  it('converges to a self-consistent flow when the arrestor ΔP is large', () => {
+    const dev = pvrv(17, 0.0508, 5000);
+    const { flow_out, arrestor } = engine.calcArrestedOutflow(dev, 14, ctx);
+    expect(flow_out).toBeLessThan(2500);
+    expect(Math.abs(residual(dev, flow_out))).toBeLessThan(0.05);
+    expect(arrestor.badge).toBe('FAIL');
+  });
+
+  it('keeps free-vent flow and reports N/A budget when MAWP is 0', () => {
+    const dev = { type: 'FREE_VENT', direction: 'BOTH', rated_flow_outbreathing: 300, flame_arrestor: { K: 3.5, diameter_m: 0.1016 } };
+    const { flow_out, arrestor } = engine.calcArrestedOutflow(dev, 0, ctx);
+    expect(flow_out).toBe(300);
+    expect(arrestor.badge).toBe('N/A');
+    expect(arrestor.deltaP_kPa).toBeGreaterThan(0);
+  });
+
+  it('is used by calcActualVenting for devices with an arrestor', () => {
+    const r = engine.calcActualVenting([pvrv(17, 0.0508, 5000), { ...pvrv(0, 0, 500), flame_arrestor: undefined }], 14, 0, ctx);
+    expect(r.devices[0].arrestor).not.toBeNull();
+    expect(r.devices[1].arrestor).toBeNull();
+    expect(r.devices[1].flow_out).toBe(500);
+    expect(r.emergency_out).toBeCloseTo(r.devices[0].flow_out + 500, 9);
+  });
+});

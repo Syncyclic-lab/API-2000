@@ -248,7 +248,6 @@
     .alert svg { flex-shrink: 0; margin-top: 1px; }
     .alert-warn { background: var(--orange-bg); color: #9a5a05; border: 1px solid #f5d3a0; }
     .alert-error { background: var(--red-bg); color: var(--red); border: 1px solid #f5b7b5; }
-    .alert-success { background: var(--green-bg); color: var(--green); border: 1px solid #a8dab5; }
 
     .result-section { margin-bottom: 20px; }
     .result-section h3 {
@@ -312,19 +311,6 @@
     .collapsible-toggle.open .arrow { transform: rotate(90deg); }
     .collapsible-body { display: none; }
     .collapsible-body.open { display: block; }
-
-    /* ── Loading spinner ─────────────────────── */
-    .spinner {
-      display: inline-block;
-      width: 18px; height: 18px;
-      border: 2px solid rgba(255,255,255,.3);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: spin .6s linear infinite;
-      vertical-align: middle;
-      margin-right: 6px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── Sticky results panel ────────────────── */
     @media (min-width: 961px) {
@@ -754,7 +740,7 @@
         <button type="button" class="tab-button" data-tab="tab-actual">Actual Venting</button>
       </nav>
       <div class="panel-body">
-        <form id="calcForm" autocomplete="off">
+        <form id="calcForm" autocomplete="off" novalidate>
           <div id="tab-required" class="tab-content active">
 
           <!-- ══ META ══ -->
@@ -763,9 +749,17 @@
             <div class="field">
               <label for="unitSystem">Unit System</label>
               <select id="unitSystem">
-                <option value="SI">SI &ensp;(m³, Nm³/hr, kPa, °C)</option>
+                <option value="SI">SI &ensp;(m³, Nm³/h, kPa, °C)</option>
                 <option value="US">US &ensp;(BBL, SCFH, psi, °F)</option>
               </select>
+            </div>
+            <div class="field">
+              <label for="ventMethod">Normal Venting Method</label>
+              <select id="ventMethod">
+                <option value="ANNEX_A" selected>Annex A alternative (Tables A.1/A.3)</option>
+                <option value="GENERAL">§3.3.2 general method (Eqs. 1–13)</option>
+              </select>
+              <div class="hint">Annex A: uninsulated tanks &lt; 30,000 m³ at ≤ 48.9 °C</div>
             </div>
             <div class="field">
               <label for="tagNumber">Tag Number</label>
@@ -808,12 +802,12 @@
             <div class="field">
               <label for="tankMAWP">MAWP <span class="unit press-unit">kPa(g)</span></label>
               <input type="number" id="tankMAWP" step="any" min="0" required>
-              <div class="hint">Max Allowable Working Pressure</div>
+              <div class="hint">Max allowable working (design) pressure</div>
             </div>
             <div class="field">
               <label for="tankMAWV">MAWV <span class="unit press-unit">kPa(g)</span></label>
               <input type="number" id="tankMAWV" step="any" min="0" required>
-              <div class="hint">Max Allowable Working Vacuum</div>
+              <div class="hint">Max allowable working vacuum</div>
             </div>
             <div class="field">
               <label for="tankElevation">Elevation Above Grade <span class="unit dim-unit">m</span></label>
@@ -831,16 +825,26 @@
             <div class="field">
               <label>Volatility Classification</label>
               <div id="volatilityIndicator" class="volatility-badge neutral">Enter flash point</div>
-              <div class="hint">Auto-determined per API 2000 §1.5/§4 (volatile if FP &lt; 38 °C / 100 °F)</div>
+              <div class="hint" id="volatilityHint">Annex A: volatile if flash point &lt; 37.8 °C (100 °F)</div>
             </div>
-            <div class="field">
+            <div class="field" id="flashPointField">
               <label for="flashPoint">Flash Point <span class="unit temp-unit">°C</span></label>
-              <input type="number" id="flashPoint" step="any" required>
-              <div class="hint">Threshold: 38 °C (100 °F)</div>
+              <input type="number" id="flashPoint" step="any">
+              <div class="hint">Required for Annex A</div>
+            </div>
+            <div class="field" id="vaporPressureField" style="display:none;">
+              <label for="vaporPressureClass">Vapor Pressure</label>
+              <select id="vaporPressureClass">
+                <option value="NONVOLATILE">≤ 5.0 kPa (0.73 psia) — nonvolatile</option>
+                <option value="HEXANE">&gt; 5.0 kPa, similar to hexane</option>
+                <option value="HIGHER" selected>Higher than hexane, or unknown</option>
+              </select>
+              <div class="hint">§3.3.2.2 volatility and Table 2 C-factor</div>
             </div>
             <div class="field">
-              <label for="operatingTemp">Operating Temperature <span class="unit temp-unit">°C</span></label>
+              <label for="operatingTemp">Average Storage Temperature <span class="unit temp-unit">°C</span></label>
               <input type="number" id="operatingTemp" step="any">
+              <div class="hint">Selects the Table 2 C-factor (general method)</div>
             </div>
             <div class="field">
               <label for="maxFillRate">Max Fill Rate <span class="unit fill-unit">m³/hr</span></label>
@@ -853,40 +857,31 @@
             <div class="field">
               <label for="latentHeat">Latent Heat of Vaporization <span class="unit heat-unit">J/kg</span></label>
               <input type="number" id="latentHeat" step="any" min="0">
-              <div class="hint">Required for emergency (fire case)</div>
+              <div class="hint">Fire case, Eq. 14 (blank = hexane basis)</div>
             </div>
             <div class="field">
               <label for="molWeight">Molecular Weight <span class="unit">g/mol</span></label>
               <input type="number" id="molWeight" step="any" min="0">
+              <div class="hint">Fire case, Eq. 14 (blank = hexane basis)</div>
             </div>
             <div class="field">
               <label for="relievingTemp">Relieving Vapor Temp <span class="unit temp-unit">°C</span></label>
               <input type="number" id="relievingTemp" step="any">
-              <div class="hint">Bubble point temperature</div>
-            </div>
-            <div class="field" id="fluidKField" style="display:none;">
-              <label for="fluidK">Ratio of Specific Heats (<i>k</i>)</label>
-              <input type="number" id="fluidK" step="0.01" min="1" max="2" placeholder="e.g. 1.4">
-              <div class="hint">Air = 1.4, Methane = 1.31, Propane = 1.13</div>
-            </div>
-            <div class="field" id="fluidZiField" style="display:none;">
-              <label for="fluidZi">Compressibility Factor (<i>Z<sub>i</sub></i>)</label>
-              <input type="number" id="fluidZi" step="0.01" min="0" max="2" value="1.0">
-              <div class="hint">1.0 = ideal gas (default)</div>
+              <div class="hint">Bubble point at relieving pressure</div>
             </div>
           </div>
 
           <!-- ══ ENVIRONMENT ══ -->
           <div class="section-title">Environment &amp; Insulation</div>
           <div class="field-grid">
-            <div class="field">
-              <label for="latitudeZone">Latitude Zone</label>
+            <div class="field" id="latitudeField" style="display:none;">
+              <label for="latitudeZone">Latitude</label>
               <select id="latitudeZone">
-                <option value="BELOW_42N">Below 42°N</option>
-                <option value="BETWEEN_42N_AND_58N" selected>42°N – 58°N</option>
-                <option value="ABOVE_58N">Above 58°N</option>
+                <option value="BELOW_42N">Below 42°</option>
+                <option value="BETWEEN_42N_AND_58N" selected>42° – 58°</option>
+                <option value="ABOVE_58N">Above 58°</option>
               </select>
-              <div class="hint">Per API 2000 §6.3.1 Table 1</div>
+              <div class="hint">§3.3.2.3, Tables 1 &amp; 2</div>
             </div>
             <div class="field">
               <label for="insulationType">Insulation Type</label>
@@ -901,28 +896,34 @@
 
           <div class="insulation-fields" id="insulationFields">
             <div class="field-grid">
-              <div class="field">
+              <div class="field insul-prop">
                 <label for="insulThickness">Insulation Thickness <span class="unit insul-thick-unit">mm</span></label>
                 <input type="number" id="insulThickness" step="any" min="0">
               </div>
-              <div class="field">
+              <div class="field insul-prop">
                 <label for="insulConductivity">Thermal Conductivity <span class="unit insul-k-unit">W/(m·K)</span></label>
                 <input type="number" id="insulConductivity" step="any" min="0">
               </div>
-              <div class="field">
-                <label for="insulHTC">Internal HT Coeff. <span class="unit insul-h-unit">W/(m²·K)</span></label>
+              <div class="field insul-prop">
+                <label for="insulHTC">Inside HT Coeff. <span class="unit insul-h-unit">W/(m²·K)</span></label>
                 <input type="number" id="insulHTC" step="any" min="0">
+                <div class="hint">Blank = 4 W/(m²·K) (Eq. 11 note)</div>
               </div>
               <div class="field" id="coverageFractionField" style="display:none;">
-                <label for="coverageFraction">Coverage Fraction</label>
+                <label for="coverageFraction">Insulated Area Fraction (A<sub>inp</sub>/A<sub>TTS</sub>)</label>
                 <input type="number" id="coverageFraction" step="0.01" min="0" max="1" placeholder="0.0 – 1.0">
-                <div class="hint">Fraction of surface insulated</div>
+                <div class="hint">Eq. 12</div>
+              </div>
+              <div class="field" id="containmentFractionField" style="display:none;">
+                <label for="containmentFraction">Area Outside Containment (A<sub>c</sub>/A)</label>
+                <input type="number" id="containmentFraction" step="0.01" min="0" max="1" placeholder="0.0 – 1.0">
+                <div class="hint">Eq. 13 (0 = fully inside containment)</div>
               </div>
             </div>
           </div>
 
           <!-- ══ ABNORMAL SCENARIOS ══ -->
-          <div class="section-title">Abnormal Scenarios (§4.2)</div>
+          <div class="section-title">Other Circumstances (§3.2.5)</div>
           <div class="check-list">
             <label class="check-item"><input type="checkbox" id="ab_controlValve"><span>Control valve failure</span></label>
             <label class="check-item"><input type="checkbox" id="ab_blanketGas"><span>Blanket gas equipment failure</span></label>
@@ -936,14 +937,28 @@
             <label class="check-item"><input type="checkbox" id="ab_atmChange"><span>Atmospheric pressure change</span></label>
           </div>
 
-          <!-- ══ CALCULATION OPTIONS ══ -->
-          <div class="section-title">Calculation Options</div>
+          <!-- ══ EMERGENCY VENTING ══ -->
+          <div class="section-title">Emergency Venting — Fire Exposure (§3.3.3)</div>
           <div class="check-list">
-            <label class="check-item"><input type="checkbox" id="opt_fireCaseEnabled" checked><span>Include emergency fire case (§7)</span></label>
-            <label class="check-item"><input type="checkbox" id="opt_drainage"><span>Credit for drainage (§7.3.3)</span></label>
-            <label class="check-item"><input type="checkbox" id="opt_fireproofing"><span>Credit for fireproofing (§7.3.3)</span></label>
+            <label class="check-item"><input type="checkbox" id="opt_fireCaseEnabled" checked><span>Include emergency fire case</span></label>
           </div>
           <div class="field-grid" style="margin-top: 12px;">
+            <div class="field">
+              <label for="envFactor">Environmental Factor F (Table 9)</label>
+              <select id="envFactor">
+                <option value="BARE" selected>Bare metal tank — 1.0</option>
+                <option value="INSULATED">Insulated tank — from insulation conductance</option>
+                <option value="IMPOUNDMENT">Impoundment away from tank — 0.5</option>
+                <option value="EARTH_COVERED">Earth-covered storage above grade — 0.03</option>
+                <option value="UNDERGROUND">Underground storage — 0</option>
+                <option value="CUSTOM">Custom value</option>
+              </select>
+              <div class="hint">One credit only; water spray and depressuring get no credit</div>
+            </div>
+            <div class="field" id="customEnvFactorField" style="display:none;">
+              <label for="customEnvFactor">Custom F</label>
+              <input type="number" id="customEnvFactor" step="any" min="0" max="1">
+            </div>
             <div class="field">
               <label for="manualWettedArea">Manual Wetted Area Override <span class="unit area-unit">m²</span></label>
               <input type="number" id="manualWettedArea" step="any" min="0" placeholder="Leave blank to auto-calculate">

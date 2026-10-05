@@ -1,7 +1,8 @@
 // ============================================================
 // constants.js  (browser build)
-// API Std 2000 (7th Edition) lookup tables and physical constants.
-// SI-only. The engine converts user inputs to SI at the boundary.
+// API Std 2000 (7th Edition, March 2014) tables and physical constants.
+// SI-only. index.js converts user inputs to SI at the boundary.
+// Section/table numbers below refer to API Std 2000, 7th Edition.
 // ============================================================
 
 'use strict';
@@ -11,90 +12,120 @@ window.API2000 = window.API2000 || {};
 // --- PHYSICAL CONSTANTS ------------------------------------------------------
 
 window.API2000.PHYSICAL = {
-  R_SI:              8314.46,   // J/(kmol·K)
-  T_STD_SI:          273.15,    // K
-  P_ATM_KPA:         101.325,   // kPa absolute
-  C_TO_K:            273.15,
-  T_FIRE_SURFACE_C:  904,       // Flame surface temperature (API 2000 §7.3.2)
-  MOLAR_VOL_NM3_KGMOL: 22.414,  // Normal conditions (0°C, 101.325 kPa)
-  MOLAR_VOL_SM3_KGMOL: 23.6445, // Standard conditions (15°C, 101.325 kPa)
-  SECONDS_PER_HOUR:    3600,
+  R:                8314.46,  // J/(kmol·K)
+  T_NORMAL_K:       273.15,   // Normal conditions: 0 °C, 101.325 kPa (Annex D.2)
+  P_ATM_KPA:        101.325,  // kPa absolute
+  C_TO_K:           273.15,
+  MOLAR_VOL_NM3:    22.414,   // Nm³/kmol at normal conditions (Annex D.2)
+  SECONDS_PER_HOUR: 3600,
 };
 
-// --- THERMAL VENTING (API 2000 Annex A, Table A.3, SI) -----------------------
-// Simplified thermal-venting method. Inbreathing is read directly from the
-// table below as a function of tank capacity (latitude-independent — latitude
-// only enters the alternative §3.3.2 formula method). Out-breathing is derived
-// from inbreathing via the factors in THERMAL (Table A.3 footnotes c/d).
-//
-// Columns: [tank capacity m³, thermal inbreathing Nm³/hr of air]  (Table A.3 col. 2)
-window.API2000.TABLE_A3_SI = [
-  [    10,    1.69 ],
-  [    20,    3.38 ],
-  [   100,   16.9  ],
-  [   200,   33.8  ],
-  [   300,   50.4  ],
-  [   500,   84.5  ],
-  [   700,  118    ],
-  [  1000,  169    ],
-  [  1500,  254    ],
-  [  2000,  338    ],
-  [  3000,  507    ],
-  [  3180,  537    ],
-  [  4000,  647    ],
-  [  5000,  787    ],
-  [  6000,  896    ],
-  [  7000, 1003    ],
-  [  8000, 1077    ],
-  [  9000, 1136    ],
-  [ 10000, 1210    ],
-  [ 12000, 1345    ],
-  [ 14000, 1480    ],
-  [ 16000, 1615    ],
-  [ 18000, 1750    ],
-  [ 20000, 1877    ],
-  [ 25000, 2179    ],
-  [ 30000, 2495    ],
-];
+// --- NORMAL VENTING: GENERAL METHOD (§3.3.2) ---------------------------------
 
-window.API2000.THERMAL = {
-  // Table A.3 footnote c: for stocks with a flash point ≥ 37.8 °C (non-volatile)
-  // the out-breathing requirement is 60 % of the inbreathing requirement.
-  OUT_FACTOR_NONVOLATILE: 0.60,
-  // Table A.3 footnote d: for stocks with a flash point < 37.8 °C (volatile)
-  // the out-breathing requirement is 100 % of the inbreathing requirement.
-  OUT_FACTOR_VOLATILE:    1.00,
+window.API2000.GENERAL_METHOD = {
+  // Table 1 — Y-factor for thermal out-breathing, Eq. (7): V_OT = Y · V_tk^0.9 · R_i
+  Y: { BELOW_42N: 0.32, BETWEEN_42N_AND_58N: 0.25, ABOVE_58N: 0.2 },
+  // Table 2 — C-factor for thermal inbreathing, Eq. (9): V_IT = C · V_tk^0.7 · R_i
+  //   cool:  vapour pressure similar to hexane AND average storage temperature < 25 °C
+  //   other: every other case (hexane-like ≥ 25 °C, higher than hexane, or unknown)
+  C: {
+    BELOW_42N:           { cool: 4,   other: 6.5 },
+    BETWEEN_42N_AND_58N: { cool: 3,   other: 5   },
+    ABOVE_58N:           { cool: 2.5, other: 4   },
+  },
+  C_TEMP_THRESHOLD_C: 25,
+  // §3.3.2.2: liquid movement. Nonvolatile = vapour pressure ≤ 5.0 kPa.
+  EMPTY_FACTOR:            1.0,  // Eq. (5)
+  FILL_FACTOR_NONVOLATILE: 1.0,  // Eq. (1)
+  FILL_FACTOR_VOLATILE:    2.0,  // Eq. (3)
+  // Out-breathing must be converted to air-equivalent flow above 49 °C (§3.3.2.2.1, D.9).
+  AIR_EQUIVALENT_TEMP_LIMIT_C: 49,
+  // NOTE to Eq. (11): inside heat-transfer coefficient commonly assumed, W/(m²·K).
+  H_INSIDE_DEFAULT: 4,
+  // Eq. (13): R_c = 0.25 + 0.75 · A_c / A  (double-wall tanks)
+  DOUBLE_WALL_BASE: 0.25,
 };
 
-// Applicability range of the API 2000 Annex A simplified thermal table.
-// Outside this range log-log extrapolation is applied and the result should be
-// verified with the §3.3.2 formula method.
-window.API2000.TABLE1_VOLUME_LIMITS_M3 = {
-  MIN: 10,
-  MAX: 30_000,
+// --- NORMAL VENTING: ANNEX A ALTERNATIVE METHOD ------------------------------
+
+window.API2000.ANNEX_A = {
+  // Table A.3 — [tank capacity m³, inbreathing (col. 2), out-breathing for
+  // flash point ≥ 37.8 °C (col. 3)], all Nm³/h of air. Out-breathing for
+  // flash point < 37.8 °C (col. 4) equals inbreathing. Interpolation allowed.
+  TABLE_A3: [
+    [    10,    1.69,    1.01 ],
+    [    20,    3.38,    2.02 ],
+    [   100,   16.9,    10.1  ],
+    [   200,   33.8,    20.3  ],
+    [   300,   50.4,    30.4  ],
+    [   500,   84.5,    50.7  ],
+    [   700,  118,      71.0  ],
+    [  1000,  169,     101    ],
+    [  1500,  254,     152    ],
+    [  2000,  338,     203    ],
+    [  3000,  507,     304    ],
+    [  3180,  537,     322    ],
+    [  4000,  647,     388    ],
+    [  5000,  787,     472    ],
+    [  6000,  896,     538    ],
+    [  7000, 1003,     602    ],
+    [  8000, 1077,     646    ],
+    [  9000, 1136,     682    ],
+    [ 10000, 1210,     726    ],
+    [ 12000, 1345,     807    ],
+    [ 14000, 1480,     888    ],
+    [ 16000, 1615,     969    ],
+    [ 18000, 1750,    1047    ],
+    [ 20000, 1877,    1126    ],
+    [ 25000, 2179,    1307    ],
+    [ 30000, 2495,    1497    ],
+  ],
+  // Table A.1 — Nm³/h of air per m³/h of liquid movement.
+  EMPTY_FACTOR:            0.94,
+  FILL_FACTOR_NONVOLATILE: 1.01,
+  FILL_FACTOR_VOLATILE:    2.02,
+  VOLATILE_FLASH_POINT_C:  37.8,
+  // A.1.2 service conditions.
+  MAX_VOLUME_M3: 30_000,
+  MAX_TEMP_C:    48.9,
 };
 
-// --- FIRE-CASE HEAT INPUT (API 2000 §7.3.2, SI only) --------------------------
+// --- EMERGENCY VENTING: FIRE EXPOSURE (§3.3.3) --------------------------------
 
-window.API2000.FIRE_CASE = {
-  exponent:            0.82,
-  NO_CREDIT:           70_900,
-  DRAINAGE_CREDIT:     43_200,
-  F_BARE:              1.0,
-  FIREPROOFING_FACTOR: 0.25,
-  MAX_WETTED_AREA_M2:  260,
+window.API2000.FIRE = {
+  // Table 5 note a — wetted area rules.
   GRADE_LIMIT_M:       9.14,
+  SPHERE_FRACTION:     0.55,
+  HORIZONTAL_FRACTION: 0.75,
+  // Table 3 — heat input Q (W) for A_TWS < 260 m²: [upper area bound m², coefficient, exponent]
+  HEAT_INPUT_BANDS: [
+    [  18.6,  63_150, 1     ],
+    [  93,   224_200, 0.566 ],
+    [ 260,   630_400, 0.338 ],
+  ],
+  LARGE_AREA_M2:          260,
+  LARGE_AREA_COEFF:       43_200,     // Q = 43,200 · A^0.82 when design pressure > 7 kPa(g)
+  LARGE_AREA_EXPONENT:    0.82,
+  LARGE_AREA_LOW_P_Q_W:   4_129_700,  // constant Q when design pressure ≤ 7 kPa(g)
+  LOW_PRESSURE_LIMIT_KPA: 7,
+  MAX_DESIGN_PRESSURE_KPA: 103.4,     // scope limit of Table 3
+  // Eq. (14): q = 906.6 · Q · F / L · (T / M)^0.5
+  EQ14_COEFF: 906.6,
+  // Hexane basis of Tables 5 and 7 and Eq. (16) (§3.3.3.3.3). The published
+  // values (e.g. 19,910 Nm³/h and the 208.2 constant) are reproduced by Eq. (14)
+  // with T = 273.15 K, so that temperature is used here.
+  HEXANE: { L: 334_900, M: 86.17, T_K: 273.15 },
+  // Table 9 — environmental factor F (credit for one factor only).
+  ENV_FACTORS: { BARE: 1.0, IMPOUNDMENT: 0.5, EARTH_COVERED: 0.03, UNDERGROUND: 0 },
+  // Table 9 note b — insulated F = conductance · 887.9 K / 66,200 W/m².
+  INSULATION_DT_K:           887.9,
+  INSULATION_HEAT_FLUX_W_M2: 66_200,
 };
 
-// --- OPERATIONAL VENTING (API 2000 §6.3.2) -----------------------------------
+// Scope limit of API Std 2000 (§1): 103.4 kPa(g) / 15 psig.
+window.API2000.MAX_SCOPE_PRESSURE_KPA = 103.4;
 
-window.API2000.OPERATIONAL = {
-  INBREATHING_FACTOR:               1.00,
-  NON_VOLATILE_OUTBREATHING_FACTOR: 1.00,
-  VOLATILE_OUTBREATHING_FACTOR:     2.00,
-};
-
-// --- AIR PROPERTIES (for inbreathing through open vents) ---------------------
+// --- AIR PROPERTIES (venting capacities are air-equivalent flows) -------------
 
 window.API2000.AIR_PROPERTIES = {
   k:  1.4,
@@ -109,41 +140,32 @@ window.API2000.OPEN_VENT = {
   CD_MIN:     0.3,
   CD_MAX:     0.8,
   MIN_PIPE_DIAM_M: 0.0254,
-  // Default allowable pressure/vacuum (gauge kPa) used to size open vents on
-  // atmospheric tanks when MAWP/MAWV is 0 or not provided. 0.5 kPa ≈ 2 in H2O
-  // is the typical minimum PV-valve opening cited in API 2000 (C.3.4).
+  // Allowable pressure/vacuum (gauge kPa) used to size open vents on
+  // atmospheric tanks when MAWP/MAWV is 0. 0.5 kPa ≈ 2 in H2O.
   ATM_DEFAULT_ALLOWABLE_KPA: 0.5,
-};
-
-// --- INSULATION HEAT-TRANSFER DEFAULTS (API 2000 §4.4.2) ---------------------
-
-window.API2000.INSULATION = {
-  H_BARE_W_M2_K: 4.73,   // Reference bare-shell heat-transfer coefficient
-  H_OUT_W_M2_K:  10.0,   // Outside film coefficient for insulated shell
+  // Inbreathing air is drawn from ambient, taken as 15.6 °C (Annex A.3.3.3).
+  AMBIENT_AIR_TEMP_C: 15.6,
 };
 
 // --- UNIT CONVERSIONS --------------------------------------------------------
 
 window.API2000.CONVERSIONS = {
   BBL_TO_M3:      0.158987,
-  M3_TO_BBL:      6.28981,
-  SCFH_TO_NM3HR:  0.02832,
-  NM3HR_TO_SCFH:  35.3147,
-  FT2_TO_M2:      0.092903,
-  M2_TO_FT2:      10.7639,
+  // Nm³ (0 °C) per SCF (60 °F), ratio of ideal-gas molar volumes — Annex D, Eq. (D.2).
+  SCF_TO_NM3:     0.026793,
   FT_TO_M:        0.3048,
+  FT2_TO_M2:      0.09290304,
   IN_TO_M:        0.0254,
   MM_TO_M:        0.001,
-  PSI_TO_KPA:     6.89476,
-  KPA_TO_PSI:     0.145038,
-  C_TO_K:         273.15,
-  BTU_HR_TO_W:    0.293071,
-  W_TO_BTU_HR:    3.41214,
+  PSI_TO_KPA:     6.894757,
+  KPA_TO_PSI:     0.1450377,
+  W_TO_BTU_HR:    3.412142,
   BTU_LB_TO_J_KG: 2326.0,
+  KG_TO_LB:       2.204623,
   // BTU·in/(hr·ft²·°F) to W/(m·K)
-  BTU_IN_HR_FT2_F_TO_W_M_K: 0.1442,
+  BTU_IN_HR_FT2_F_TO_W_M_K: 0.1442279,
   // BTU/(hr·ft²·°F) to W/(m²·K)
-  BTU_HR_FT2_F_TO_W_M2_K:   5.678,
+  BTU_HR_FT2_F_TO_W_M2_K:   5.678263,
   // Pressure conversions used by the flame-arrestor module.
   PA_TO_MBAR:               0.01,
   PA_TO_INH2O:              0.00401463,
@@ -162,10 +184,8 @@ window.API2000.FLAME_ARRESTOR = {
     INLINE_ECCENTRIC_DETONATION:   { label: 'Inline eccentric detonation',      k_low: 15, k_high: 40, k_default: 25  },
     PRE_VOLUME_DETONATION:         { label: 'Pre-volume / unstable detonation', k_low: 20, k_high: 50, k_default: 35  },
   },
-  // Warn if arrestor ΔP consumes more than this fraction of available relieving overpressure
+  // Warn if arrestor ΔP at rated flow consumes more than this fraction of MAWP
   BUDGET_WARNING_FRACTION: 0.5,
-  // Warn if ΔP exceeds this fraction (adequacy failure risk)
+  // Fail if ΔP exceeds this fraction (adequacy failure risk)
   BUDGET_FAILURE_FRACTION: 0.9,
-  // Iteration cap for the ΔP ↔ device-flow fixed-point loop
-  MAX_ITERATIONS:          2,
 };
