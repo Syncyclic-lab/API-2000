@@ -22,7 +22,11 @@
     toNm3hr:               scaleUS(C.SCF_TO_NM3),       // SCFH → Nm³/h
     insulConductivityToSI: scaleUS(C.BTU_IN_HR_FT2_F_TO_W_M_K),
     insulHTCToSI:          scaleUS(C.BTU_HR_FT2_F_TO_W_M2_K),
+    toKgM3:                scaleUS(C.LB_FT3_TO_KG_M3),  // lb/ft³ → kg/m³
+    toKgH:                 scaleUS(1 / C.KG_TO_LB),     // lb/h → kg/h
     toC: (value, unitSystem) => (isUS(unitSystem) ? (value - 32) / 1.8 : value),
+    // Heat rates are entered in BTU/h (US) or kW (SI).
+    toW: (value, unitSystem) => (isUS(unitSystem) ? value / C.W_TO_BTU_HR : value * C.KW_TO_W),
     // Small-bore lengths are entered in inches (US) or millimetres (SI).
     smallLengthToM: (value, unitSystem) => value * (isUS(unitSystem) ? C.IN_TO_M : C.MM_TO_M),
 

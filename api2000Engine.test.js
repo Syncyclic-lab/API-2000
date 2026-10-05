@@ -169,6 +169,34 @@ describe('Emergency venting (Eq. 14)', () => {
   });
 });
 
+describe('Other circumstances (§3.2.5) helpers', () => {
+  it('airEquivalentFlow returns the normal volume of air for air at 0 °C (Eq. D.37 / D.43)', () => {
+    expectRel(engine.airEquivalentFlow(3600, 29, 273.15), 3600 / 29 * 22.414);
+    // Heavier, hotter gas needs more equivalent air: × √(M·T / (29·273.15))
+    expectRel(engine.airEquivalentFlow(3600, 58, 300) / engine.airEquivalentFlow(3600, 29, 273.15),
+      Math.sqrt(29 * 300 / (58 * 273.15)), 1e-9);
+  });
+
+  it('calcExposedArea gives shell + roof (vertical) or total surface', () => {
+    expect(engine.calcExposedArea('VERTICAL_CYLINDER', 10, 12)).toBeCloseTo(Math.PI * 120 + Math.PI * 25, 9);
+    expect(engine.calcExposedArea('HORIZONTAL_CYLINDER', 3, 10)).toBeCloseTo(Math.PI * 30 + Math.PI * 4.5, 9);
+    expect(engine.calcExposedArea('SPHERE', 4)).toBeCloseTo(Math.PI * 16, 9);
+    expect(engine.calcExposedArea('VERTICAL_CYLINDER', 10, null)).toBeNull();
+  });
+
+  it('calcHotTankInbreathing applies Annex A Eq. (A.3)', () => {
+    const actual = 8314.46 * 4 * 100 * 100 / (101325 * 29100) * 3600;
+    expectRel(engine.calcHotTankInbreathing(100, 4, 100, 373.15), actual * 273.15 / 373.15);
+    expect(engine.calcHotTankInbreathing(100, 4, -5, 300)).toBe(0);
+    // Annex A basis for the largest tank: 4324 m², h·ΔT = 63 W/m² from 48.9 °C → Table A.3 gives 2,495 Nm³/h.
+    expectRel(engine.calcHotTankInbreathing(4324, 1, 63, 322.05), 2495, 0.1);
+  });
+
+  it('calcBarometricBreathing is V · (dp/dt) / p at normal conditions', () => {
+    expectRel(engine.calcBarometricBreathing(10_000, 1, 273.15), 10_000 / 101.325);
+  });
+});
+
 describe('calculateOpenVentCapacity', () => {
   it('returns 0 when any required argument is missing or zero', () => {
     expect(engine.calculateOpenVentCapacity(0,   110, 101.325, 1.4, 300, 29, 1.0, 0.62)).toBe(0);

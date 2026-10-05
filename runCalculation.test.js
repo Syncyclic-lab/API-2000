@@ -17,7 +17,7 @@ const payload = (edit = () => {}) => {
     tank: { shape: 'VERTICAL_CYLINDER', volume: 1000, mawp: 2, mawv: 0.5, diameter: 12, height_or_length: 9 },
     fluid: { flash_point: 20, vapor_pressure_class: 'HEXANE', operating_temp: 20, max_fill_rate: 100, max_empty_rate: 100 },
     environment: { latitude_zone: 'BETWEEN_42N_AND_58N', insulation_type: 'UNINSULATED' },
-    abnormal_scenarios: {},
+    scenarios: {},
     fire: { include: true, environmental_factor: 'BARE' },
     devices: [],
   };
@@ -42,7 +42,8 @@ describe('runCalculation', () => {
     expect(ev.wetted_area).toBeCloseTo(339.3, 1);
     expect(ev.heat_input).toBe(4_129_700);
     expect(Math.abs(ev.required - 19_910) / 19_910).toBeLessThan(0.001);
-    expect(r.outputs.governing.emergency_governs).toBe(true);
+    expect(r.outputs.governing.outbreathing_basis).toBe('Fire exposure');
+    expect(r.outputs.design.normal_out_basis).toBe('Normal venting');
     expect(hasWarning(r, 'hexane basis')).toBe(true);
   });
 
@@ -130,5 +131,104 @@ describe('runCalculation', () => {
     expect(dev.flow_in).toBeGreaterThan(0);
     expect(r.outputs.actual_venting.adequacy.emergency_out).toBeNull();
     expect(hasWarning(r, 'default allowable')).toBe(true);
+  });
+});
+
+describe('runCalculation — other circumstances (§3.2.5)', () => {
+  const engine = window.API2000.engine;
+  const withScenario = (key, data, edit = () => {}) => runCalculation(payload(p => {
+    p.scenarios = { [key]: { enabled: true, relieved_by: 'NORMAL', ...data } };
+    edit(p);
+  }));
+  const VENT_K = 293.15;   // operating temperature 20 °C
+  const expectRel = (actual, expected, tol = 0.002) => {
+    expect(Math.abs(actual - expected) / Math.abs(expected)).toBeLessThanOrEqual(tol);
+  };
+
+  it('control valve failure adds the increase over normal fill/empty to normal venting', () => {
+    const r = withScenario('control_valve_failure', { failed_inflow: 300, failed_outflow: 250, coincident: true });
+    const sc = r.outputs.scenarios[0];
+    expect(sc.out).toBeCloseTo(200 * 2.02, 1);
+    expect(sc.in).toBeCloseTo(150 * 0.94, 1);
+    expect(r.outputs.design.normal_out).toBeCloseTo(371 + 404, 1);
+    expect(r.outputs.design.normal_out_basis).toBe('Control valve failure');
+    expect(r.outputs.design.inbreathing).toBeCloseTo(263 + 141, 1);
+  });
+
+  it('blanket gas failure converts the gas flow to air-equivalent flow', () => {
+    const r = withScenario('blanket_gas_equipment_failure', { gas_mw: 28.01, known_flow: 500, vacuum_flow: 80 });
+    const sc = r.outputs.scenarios[0];
+    expectRel(sc.out, 500 * Math.sqrt(28.01 * VENT_K / (29 * 273.15)));
+    expect(sc.in).toBe(80);
+    expect(sc.total_out).toBe(sc.out);   // not coincident
+  });
+
+  it('blanket gas regulator failure uses choked nozzle flow when no capacity is given', () => {
+    const r = withScenario('blanket_gas_equipment_failure', { supply_pressure: 700, diameter: 10, cd: 0.62, gas_mw: 28.01 });
+    const gasNm3h = engine.calculateOpenVentCapacity(0.01, 801.325, 103.325, 1.4, 288.75, 28.01, 1, 0.62);
+    expectRel(r.outputs.scenarios[0].out, engine.airEquivalentFlow(gasNm3h * 28.01 / 22.414, 28.01, VENT_K));
+  });
+
+  it('routes a scenario to the emergency path when selected', () => {
+    const r = withScenario('pressure_transfer_vapor_breakthrough',
+      { gas_mw: 28.96, known_flow: 30_000, relieved_by: 'EMERGENCY' });
+    expect(r.outputs.design.emergency_out_basis).toBe('Pressure transfer / vapor breakthrough');
+    expect(r.outputs.design.normal_out_basis).toBe('Normal venting');
+  });
+
+  it('abnormal heat transfer and exothermic reaction vaporize Q / L of the stored fluid', () => {
+    const fluid = (p) => Object.assign(p.fluid, { latent_heat: 334_900, molecular_weight: 86.17 });
+    const heat = withScenario('abnormal_heat_transfer', { heat_input: 1000 }, fluid);
+    expectRel(heat.outputs.scenarios[0].out, 906.6 * (1e6 / 334_900) * Math.sqrt(VENT_K / 86.17));
+
+    const rxn = withScenario('exothermic_reaction', { gas_generation: 100, gas_mw: 44 });
+    expectRel(rxn.outputs.scenarios[0].out, 906.6 * (100 / 3600) * Math.sqrt(VENT_K / 44));
+    expect(hasWarning(rxn, 'DIERS')).toBe(true);
+  });
+
+  it('requires fluid properties for heat-driven scenarios', () => {
+    const r = withScenario('abnormal_heat_transfer', { heat_input: 1000 });
+    expect(r.errors[0]).toMatch(/latent heat/);
+  });
+
+  it('internal heat exchanger failure models a double-ended tube rupture', () => {
+    const r = withScenario('internal_heat_exchanger_failure',
+      { supply_pressure: 1000, gas_temp: 184, diameter: 20, cd: 0.62, gas_mw: 18.02, k: 1.33 });
+    const single = engine.calculateOpenVentCapacity(0.02, 1101.325, 103.325, 1.33, 457.15, 18.02, 1, 0.62);
+    expectRel(r.outputs.scenarios[0].out, engine.airEquivalentFlow(2 * single * 18.02 / 22.414, 18.02, VENT_K));
+  });
+
+  it('uninsulated hot tank in rain sets the inbreathing requirement', () => {
+    const r = withScenario('uninsulated_hot_tank_in_rain', { vapor_temp: 150 });
+    const area = Math.PI * 12 * 9 + Math.PI * 36;
+    expectRel(r.outputs.scenarios[0].in, engine.calcHotTankInbreathing(area, 4, 150 - 15.6, 423.15));
+    expect(r.outputs.design.inbreathing_basis).toBe('Uninsulated hot tank in rain');
+  });
+
+  it('mixing of products vaporizes the flashed fraction of the volatile inflow', () => {
+    const r = withScenario('mixing_of_products', { volatile_flow: 10, density: 650, flash_percent: 5, gas_mw: 58 });
+    expectRel(r.outputs.scenarios[0].out, 906.6 * (325 / 3600) * Math.sqrt(VENT_K / 58));
+  });
+
+  it('atmospheric pressure change loads both directions', () => {
+    const r = withScenario('atmospheric_pressure_change', { rate: 0.5, coincident: true });
+    const q = 1000 * 0.5 / 101.325 * 273.15 / VENT_K;
+    expectRel(r.outputs.scenarios[0].out, q, 0.01);
+    expectRel(r.outputs.scenarios[0].in, q, 0.01);
+  });
+
+  it('liquid overfill adds no load and warns without overfill protection', () => {
+    const r = withScenario('liquid_overfill', { protection_provided: false });
+    expect(r.outputs.scenarios[0].out).toBe(0);
+    expect(r.outputs.design.normal_out_basis).toBe('Normal venting');
+    expect(hasWarning(r, 'overfill protection')).toBe(true);
+  });
+
+  it('converts US scenario inputs to SI', () => {
+    const { uc } = window.API2000;
+    expect(uc.toW(3412.142, 'US')).toBeCloseTo(1000, 3);
+    expect(uc.toW(1, 'SI')).toBe(1000);
+    expect(uc.toKgM3(1, 'US')).toBeCloseTo(16.01846, 5);
+    expect(uc.toKgH(2.204623, 'US')).toBeCloseTo(1, 6);
   });
 });

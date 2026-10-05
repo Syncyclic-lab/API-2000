@@ -8,7 +8,7 @@
 'use strict';
 
 (function () {
-  const { PHYSICAL, GENERAL_METHOD: GEN, ANNEX_A, FIRE } = window.API2000;
+  const { PHYSICAL, GENERAL_METHOD: GEN, ANNEX_A, FIRE, SCENARIOS } = window.API2000;
 
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
@@ -156,16 +156,52 @@
     }
   }
 
+  // Air-equivalent flow (Nm³/h) of a vented gas/vapour mass flow (kg/h) at
+  // temperature T — Eq. (D.37) with the SI constants of Eq. (D.43).
+  function airEquivalentFlow(massKgH, molecularWeight, tempK) {
+    return FIRE.EQ14_COEFF * (massKgH / PHYSICAL.SECONDS_PER_HOUR) * Math.sqrt(tempK / molecularWeight);
+  }
+
   // Eq. (14): required emergency venting, Nm³/h of air.
   function calcEmergencyVenting(heatInputW, F, latentHeatJkg, molecularWeight, relievingTempK) {
-    const vapour_kg_s = heatInputW * F / latentHeatJkg;   // Eq. (D.40)
+    const vapour_mass_flow_kg_hr = heatInputW * F / latentHeatJkg * PHYSICAL.SECONDS_PER_HOUR;  // Eq. (D.40)
     return {
-      emergency_out: FIRE.EQ14_COEFF * vapour_kg_s * Math.sqrt(relievingTempK / molecularWeight),
-      vapour_mass_flow_kg_hr: vapour_kg_s * PHYSICAL.SECONDS_PER_HOUR,
+      emergency_out: airEquivalentFlow(vapour_mass_flow_kg_hr, molecularWeight, relievingTempK),
+      vapour_mass_flow_kg_hr,
     };
   }
 
-  // --- 3. INSTALLED VENTING DEVICES ----------------------------------------
+  // --- 3. OTHER CIRCUMSTANCES (§3.2.5) — engineering estimates -------------
+
+  // Shell + roof (vertical) or total surface (horizontal, sphere) exposed to weather.
+  function calcExposedArea(shape, diameterM, lengthM) {
+    if (!(diameterM > 0)) return null;
+    const D = diameterM;
+    switch (shape) {
+      case 'VERTICAL_CYLINDER':   return lengthM > 0 ? Math.PI * D * lengthM + Math.PI * D * D / 4 : null;
+      case 'HORIZONTAL_CYLINDER': return lengthM > 0 ? Math.PI * D * lengthM + Math.PI * D * D / 2 : null;
+      case 'SPHERE':              return Math.PI * D * D;
+      default:                    return null;
+    }
+  }
+
+  // Vapour-space contraction of a hot tank cooled by rain, heat-transfer
+  // limited as in Annex A Eq. (A.3): dV/dt = R·h·A·ΔT / (p·Cp), expressed as
+  // Nm³/h of replacement air (contraction volume × T_normal / T_vapour).
+  function calcHotTankInbreathing(exposedAreaM2, hInside, deltaTK, vapourTempK) {
+    if (!(deltaTK > 0)) return 0;
+    const actual_m3_s = PHYSICAL.R * hInside * exposedAreaM2 * deltaTK
+      / (PHYSICAL.P_ATM_KPA * 1000 * SCENARIOS.AIR_CP_J_KMOL_K);
+    return actual_m3_s * PHYSICAL.SECONDS_PER_HOUR * PHYSICAL.T_NORMAL_K / vapourTempK;
+  }
+
+  // Breathing caused by a barometric pressure change: dV/dt = V · (dp/dt) / p,
+  // taken over the whole tank volume (empty tank), as Nm³/h.
+  function calcBarometricBreathing(volumeM3, rateKpaPerH, vapourTempK) {
+    return volumeM3 * rateKpaPerH / PHYSICAL.P_ATM_KPA * PHYSICAL.T_NORMAL_K / vapourTempK;
+  }
+
+  // --- 4. INSTALLED VENTING DEVICES ----------------------------------------
 
   // Isentropic nozzle flow of an ideal gas (Annex D, Eq. D.23), as Nm³/h.
   // When p_out/p_in is below the critical ratio the flow is choked and the
@@ -238,7 +274,11 @@
     calcWettedArea,
     calcFireHeatInput,
     calcEnvironmentalFactor,
+    airEquivalentFlow,
     calcEmergencyVenting,
+    calcExposedArea,
+    calcHotTankInbreathing,
+    calcBarometricBreathing,
     calculateOpenVentCapacity,
     calcDeviceFlow,
     calcActualVenting,

@@ -122,6 +122,19 @@ window.API2000.FIRE = {
   INSULATION_HEAT_FLUX_W_M2: 66_200,
 };
 
+// --- OTHER CIRCUMSTANCES (§3.2.5) --------------------------------------------
+// API 2000 gives no calculation methods for these (§3.2.5.1); the engineering
+// estimates use the Annex D nozzle-flow and air-equivalent relationships.
+
+window.API2000.SCENARIOS = {
+  DEFAULT_CD:       0.62,     // sharp-edged orifice / ruptured tube
+  GAS_K:            1.4,      // blanket / transfer gas (N₂, air)
+  STEAM_M:          18.02,
+  STEAM_K:          1.33,
+  AIR_CP_J_KMOL_K:  29_100,   // vapour space taken as air (Annex A.3.3)
+  RAIN_WALL_TEMP_C: 15.6,     // rain-cooled wall temperature (Annex A.3.3.3)
+};
+
 // Scope limit of API Std 2000 (§1): 103.4 kPa(g) / 15 psig.
 window.API2000.MAX_SCOPE_PRESSURE_KPA = 103.4;
 
@@ -160,6 +173,8 @@ window.API2000.CONVERSIONS = {
   PSI_TO_KPA:     6.894757,
   KPA_TO_PSI:     0.1450377,
   W_TO_BTU_HR:    3.412142,
+  KW_TO_W:        1000,
+  LB_FT3_TO_KG_M3: 16.01846,
   BTU_LB_TO_J_KG: 2326.0,
   KG_TO_LB:       2.204623,
   // BTU·in/(hr·ft²·°F) to W/(m·K)
