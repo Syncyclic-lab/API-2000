@@ -14,16 +14,22 @@ const UNITS = {
     fill: 'm³/h', heat: 'J/kg',
     insulThick: 'mm', insulK: 'W/(m·K)', insulH: 'W/(m²·K)',
     area: 'm²', flow: 'Nm³/h', pipeDiam: 'mm',
+    heatRate: 'kW', massFlow: 'kg/h', density: 'kg/m³', pressRate: 'kPa/h',
   },
   US: {
     vol: 'BBL', dim: 'ft', press: 'psi(g)', temp: '°F',
     fill: 'BBL/h', heat: 'BTU/lb',
     insulThick: 'in', insulK: 'BTU·in/(h·ft²·°F)', insulH: 'BTU/(h·ft²·°F)',
     area: 'ft²', flow: 'SCFH', pipeDiam: 'in',
+    heatRate: 'BTU/h', massFlow: 'lb/h', density: 'lb/ft³', pressRate: 'psi/h',
   },
 };
 
 const UNIT_CLASS_MAP = {
+  'heat-rate-unit':   'heatRate',
+  'mass-flow-unit':   'massFlow',
+  'density-unit':     'density',
+  'press-rate-unit':  'pressRate',
   'vol-unit':         'vol',
   'dim-unit':         'dim',
   'press-unit':       'press',
@@ -287,6 +293,10 @@ function collectDeviceData() {
       if (relievesIn)  device.rated_flow_inbreathing  = value('.dev-flow-in');
     }
 
+    // Skip cards left blank (e.g. the default card when no devices are being checked).
+    const entered = ['set_pressure', 'set_vacuum', 'rated_flow_outbreathing', 'rated_flow_inbreathing', 'pipe_diameter'];
+    if (!entered.some(k => device[k] != null)) return;
+
     // Flame arrestor — always emitted in SI (metres, dimensionless K).
     if (card.querySelector('.fa-enabled').checked) {
       const K = value('.fa-k');
@@ -346,6 +356,149 @@ deviceRoster.addEventListener('change', (e) => {
 
 btnAddDevice.addEventListener('click', renderDeviceRow);
 renderDeviceRow();
+
+// --- Other circumstances (§3.2.5) -------------------------------------------
+// Inputs per scenario; `unit` is a UNITS key. Field names match the
+// converters in index.js (SCENARIO_FIELD_UNITS). All content is static.
+
+const CD_FIELD = { name: 'cd', label: 'Discharge Coefficient C<sub>d</sub>', value: 0.62 };
+
+const SCENARIO_UI = [
+  { key: 'control_valve_failure', label: 'Control valve failure', ref: '§3.2.5.12',
+    outbreathing: true, coincident: true,
+    hint: 'Load is the increase over the normal maximum fill / empty rate. Gas blow-through after the upstream vessel empties is covered by Pressure transfer.',
+    fields: [
+      { name: 'failed_inflow',  label: 'Inflow, Inlet Valve Failed Open',   unit: 'fill' },
+      { name: 'failed_outflow', label: 'Outflow, Outlet Valve Failed Open', unit: 'fill' },
+    ] },
+  { key: 'blanket_gas_equipment_failure', label: 'Blanket gas equipment failure', ref: '§3.2.5.3',
+    outbreathing: true, coincident: true,
+    hint: 'Supply regulator failed wide open (pressure); back-pressure regulator failed open to vapor recovery (vacuum).',
+    fields: [
+      { name: 'supply_pressure', label: 'Blanket Gas Supply Pressure', unit: 'press' },
+      { name: 'diameter',        label: 'Regulator Flow Diameter',     unit: 'pipeDiam' },
+      CD_FIELD,
+      { name: 'gas_mw',          label: 'Gas Molecular Weight', value: 28.01, hint: 'N₂ 28.01, air 28.96' },
+      { name: 'known_flow',      label: 'Known Wide-Open Capacity', unit: 'flow', hint: 'Optional — overrides the orifice calculation' },
+      { name: 'vacuum_flow',     label: 'Vapor-Recovery Suction',   unit: 'flow', hint: 'Optional vacuum load' },
+    ] },
+  { key: 'abnormal_heat_transfer', label: 'Abnormal heat transfer', ref: '§3.2.5.4', outbreathing: true,
+    hint: 'Heating-control failure or loss of cooling. Vapor = Q / L with the fluid latent heat and molecular weight.',
+    fields: [{ name: 'heat_input', label: 'Uncontrolled Heat Input', unit: 'heatRate' }] },
+  { key: 'internal_heat_exchanger_failure', label: 'Internal heat exchanger failure', ref: '§3.2.5.5', outbreathing: true,
+    hint: 'Double-ended rupture of one coil/tube releasing the heating or cooling medium as gas (defaults: steam).',
+    fields: [
+      { name: 'supply_pressure', label: 'Medium Pressure',      unit: 'press' },
+      { name: 'gas_temp',        label: 'Medium Temperature',   unit: 'temp' },
+      { name: 'diameter',        label: 'Tube Inside Diameter', unit: 'pipeDiam' },
+      CD_FIELD,
+      { name: 'gas_mw',          label: 'Medium Molecular Weight', value: 18.02, hint: 'Steam 18.02' },
+      { name: 'k',               label: 'Ratio of Specific Heats k', value: 1.33, hint: 'Steam 1.33' },
+    ] },
+  { key: 'uninsulated_hot_tank_in_rain', label: 'Uninsulated hot tank in rain', ref: '§3.2.5.14',
+    hint: 'Rain cools a hot vapor space: dV/dt = R·h·A·ΔT / (p·Cp), Annex A Eq. (A.3). Replaces thermal inbreathing.',
+    fields: [
+      { name: 'vapor_temp',   label: 'Vapor-Space Temperature',   unit: 'temp' },
+      { name: 'wall_temp',    label: 'Rain-Cooled Wall Temperature', unit: 'temp', hint: 'Blank = 15.6 °C (60 °F)' },
+      { name: 'exposed_area', label: 'Exposed Shell + Roof Area', unit: 'area', hint: 'Blank = from tank dimensions' },
+      { name: 'htc',          label: 'Inside HT Coeff.',          unit: 'insulH', hint: 'Blank = 4 W/(m²·K)' },
+    ] },
+  { key: 'exothermic_reaction', label: 'Exothermic reaction', ref: '§3.2.5.9', outbreathing: true,
+    hint: 'Vapor from the reaction heat (Q / L, fluid properties) plus any non-condensable gas generated.',
+    fields: [
+      { name: 'heat_input',     label: 'Reaction Heat Release', unit: 'heatRate' },
+      { name: 'gas_generation', label: 'Gas Generation Rate',   unit: 'massFlow' },
+      { name: 'gas_mw',         label: 'Generated Gas Molecular Weight' },
+    ] },
+  { key: 'mixing_of_products', label: 'Mixing of products', ref: '§3.2.5.16', outbreathing: true,
+    hint: 'A more volatile material entering the tank flashes; vapor = inflow × density × fraction vaporized.',
+    fields: [
+      { name: 'volatile_flow', label: 'Inflow of Volatile Material', unit: 'fill' },
+      { name: 'density',       label: 'Liquid Density',              unit: 'density' },
+      { name: 'flash_percent', label: 'Fraction Vaporized',          unitText: '%' },
+      { name: 'gas_mw',        label: 'Vapor Molecular Weight' },
+    ] },
+  { key: 'liquid_overfill', label: 'Liquid overfill', ref: '§3.2.5.10', noLoad: true,
+    hint: 'Tank vents must not be used for overfill protection, so no venting load is calculated.',
+    fields: [{ name: 'protection_provided', label: 'Independent overfill protection provided (API 2350 / EN 13616)', type: 'checkbox' }] },
+  { key: 'pressure_transfer_vapor_breakthrough', label: 'Pressure transfer / vapor breakthrough', ref: '§3.2.5.2', outbreathing: true,
+    hint: 'Gas blowing through the transfer line once the supply vessel empties, into the tank at MAWP.',
+    fields: [
+      { name: 'supply_pressure', label: 'Supply Vessel / Truck Pressure', unit: 'press' },
+      { name: 'diameter',        label: 'Line / Valve Flow Diameter',     unit: 'pipeDiam' },
+      CD_FIELD,
+      { name: 'gas_mw',          label: 'Gas Molecular Weight', value: 28.96, hint: 'Air 28.96, N₂ 28.01' },
+      { name: 'known_flow',      label: 'Known Gas Flow', unit: 'flow', hint: 'Optional — overrides the line calculation' },
+    ] },
+  { key: 'atmospheric_pressure_change', label: 'Atmospheric pressure change', ref: '§3.2.5.11',
+    outbreathing: true, coincident: true,
+    hint: 'Barometric change acting on the full tank volume: dV/dt = V · (dp/dt) / p. Loads both directions.',
+    fields: [{ name: 'rate', label: 'Barometric Change Rate', unit: 'pressRate', hint: 'Severe storms ≈ 0.2–0.5 kPa/h' }] },
+];
+
+const UNIT_KEY_CLASS = Object.fromEntries(Object.entries(UNIT_CLASS_MAP).map(([cls, key]) => [key, cls]));
+
+function scenarioField(f) {
+  if (f.type === 'checkbox') {
+    return `<label class="check-item"><input type="checkbox" data-sc-field="${f.name}"><span>${f.label}</span></label>`;
+  }
+  const unit = f.unit ? `<span class="unit ${UNIT_KEY_CLASS[f.unit]}"></span>` : (f.unitText ? `<span class="unit">${f.unitText}</span>` : '');
+  return `
+    <div class="field">
+      <label>${f.label} ${unit}</label>
+      <input type="number" step="any" data-sc-field="${f.name}"${f.value != null ? ` value="${f.value}"` : ''}>
+      ${f.hint ? `<div class="hint">${f.hint}</div>` : ''}
+    </div>`;
+}
+
+function renderScenarios() {
+  $('scenarioList').innerHTML = SCENARIO_UI.map(sc => `
+    <div class="scenario" data-scenario="${sc.key}">
+      <label class="check-item"><input type="checkbox" class="sc-enabled"><span>${sc.label}<span class="ref">${sc.ref}</span></span></label>
+      <div class="scenario-body">
+        <div class="hint">${sc.hint}</div>
+        <div class="field-grid">
+          ${sc.fields.map(scenarioField).join('')}
+          ${sc.outbreathing ? `
+            <div class="field">
+              <label>Pressure Load Relieved By</label>
+              <select data-sc-field="relieved_by">
+                <option value="NORMAL">Normal venting devices</option>
+                <option value="EMERGENCY">Emergency devices (incl. EPRV)</option>
+              </select>
+              <div class="hint">§3.6.1</div>
+            </div>` : ''}
+          ${sc.noLoad ? '' : `
+            <label class="check-item"><input type="checkbox" data-sc-field="coincident"${sc.coincident ? ' checked' : ''}>
+              <span>Coincident with normal venting${sc.key === 'uninsulated_hot_tank_in_rain' ? ' (liquid movement)' : ''}</span></label>`}
+        </div>
+      </div>
+    </div>`).join('');
+  updateUnitLabels($('scenarioList'));
+}
+
+function collectScenarios() {
+  const scenarios = {};
+  document.querySelectorAll('#scenarioList .scenario').forEach(el => {
+    if (!el.querySelector('.sc-enabled').checked) return;
+    const data = { enabled: true };
+    el.querySelectorAll('[data-sc-field]').forEach(input => {
+      const name = input.dataset.scField;
+      if (input.type === 'checkbox') data[name] = input.checked;
+      else if (input.tagName === 'SELECT') data[name] = input.value;
+      else if (input.value.trim() !== '' && !isNaN(Number(input.value))) data[name] = Number(input.value);
+    });
+    scenarios[el.dataset.scenario] = data;
+  });
+  return scenarios;
+}
+
+$('scenarioList').addEventListener('change', (e) => {
+  if (e.target.classList.contains('sc-enabled')) {
+    e.target.closest('.scenario').classList.toggle('enabled', e.target.checked);
+  }
+});
+renderScenarios();
 
 // --- Unit labels and conditional fields -------------------------------------
 
@@ -474,18 +627,7 @@ function assemblePayload() {
       coverage_fraction:            insulation === 'PARTIALLY_INSULATED' ? num('coverageFraction') : undefined,
       outside_containment_fraction: insulation === 'DOUBLE_WALL' ? num('containmentFraction') : undefined,
     },
-    abnormal_scenarios: {
-      control_valve_failure:                bool('ab_controlValve'),
-      blanket_gas_equipment_failure:        bool('ab_blanketGas'),
-      abnormal_heat_transfer:               bool('ab_abnormalHeat'),
-      internal_heat_exchanger_failure:      bool('ab_heatExchanger'),
-      uninsulated_hot_tank_in_rain:         bool('ab_hotTankRain'),
-      exothermic_reaction:                  bool('ab_exothermic'),
-      mixing_of_products:                   bool('ab_mixing'),
-      liquid_overfill:                      bool('ab_overfill'),
-      pressure_transfer_vapor_breakthrough: bool('ab_vaporBreak'),
-      atmospheric_pressure_change:          bool('ab_atmChange'),
-    },
+    scenarios: collectScenarios(),
     fire: {
       include:              bool('opt_fireCaseEnabled'),
       environmental_factor: $('envFactor').value,
@@ -544,12 +686,12 @@ function renderCompliance(o) {
   const av = o.actual_venting;
   const fu = o.flow_unit;
   const rows = [
-    { label: 'Normal Outbreathing', required: o.normal_venting.total_out, actual: av.normal_out, pass: av.adequacy.normal_out },
+    { label: 'Normal Outbreathing', required: o.design.normal_out, actual: av.normal_out, pass: av.adequacy.normal_out },
   ];
   if (av.adequacy.emergency_out != null) {
-    rows.push({ label: 'Emergency Outbreathing', required: o.emergency_venting.required, actual: av.emergency_out, pass: av.adequacy.emergency_out });
+    rows.push({ label: 'Emergency Outbreathing', required: o.design.emergency_out, actual: av.emergency_out, pass: av.adequacy.emergency_out });
   }
-  rows.push({ label: 'Inbreathing (Vacuum)', required: o.normal_venting.total_in, actual: av.inbreathing, pass: av.adequacy.inbreathing });
+  rows.push({ label: 'Inbreathing (Vacuum)', required: o.design.inbreathing, actual: av.inbreathing, pass: av.adequacy.inbreathing });
   const allPass = rows.every(r => r.pass);
 
   return `
@@ -570,6 +712,30 @@ function renderCompliance(o) {
             <span class="cr-status">${r.pass ? ICONS.statusPass : ICONS.statusFail}</span>
           </div>`).join('')}
       </div>
+    </div>`;
+}
+
+function renderScenarioResults(o) {
+  const fu = o.flow_unit;
+  const cell = (load, total, coincident) => (load > 0
+    ? `${fmtVal(total, fu)}${coincident ? '<br><small>incl. normal</small>' : ''}`
+    : '—');
+  return `
+    <div class="device-breakdown">
+      <h3>Other Circumstances (§3.2.5) — Engineering Estimates</h3>
+      <table class="device-breakdown-table">
+        <thead>
+          <tr><th>Scenario</th><th>Pressure Load</th><th>Vacuum Load</th><th>Relief Path</th></tr>
+        </thead>
+        <tbody>
+          ${o.scenarios.map(sc => `<tr>
+            <td>${escapeHtml(sc.label)} <span class="ref">${escapeHtml(sc.ref)}</span></td>
+            <td class="mono-val">${cell(sc.out, sc.total_out, sc.coincident)}</td>
+            <td class="mono-val">${cell(sc.in, sc.total_in, sc.coincident)}</td>
+            <td>${sc.out > 0 ? (sc.relieved_by === 'EMERGENCY' ? 'Emergency' : 'Normal') : (sc.in > 0 ? 'Vacuum' : 'No load')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
     </div>`;
 }
 
@@ -657,11 +823,15 @@ function renderResults(result) {
 
   if (o.actual_venting) html += renderCompliance(o);
 
-  html += section('Governing Requirements',
-    tableRow('Governing Outbreathing (pressure)', fmtVal(o.governing.outbreathing, fu)) +
-    tableRow('Governing Inbreathing (vacuum)',    fmtVal(o.governing.inbreathing, fu)) +
-    tableRow('Emergency Governs?', o.governing.emergency_governs ? 'Yes — fire case controls outbreathing' : 'No — normal venting controls'),
-    'governing-box');
+  const d = o.design;
+  let governingRows =
+    tableRow('Governing Outbreathing (pressure)', `${fmtVal(o.governing.outbreathing, fu)} — ${o.governing.outbreathing_basis}`) +
+    tableRow('Governing Inbreathing (vacuum)',    `${fmtVal(o.governing.inbreathing, fu)} — ${o.governing.inbreathing_basis}`) +
+    tableRow('Normal Venting Devices',            `${fmtVal(d.normal_out, fu)} — ${d.normal_out_basis}`);
+  if (d.emergency_out != null) {
+    governingRows += tableRow('Emergency Venting (all devices)', `${fmtVal(d.emergency_out, fu)} — ${d.emergency_out_basis}`);
+  }
+  html += section('Governing Requirements', governingRows, 'governing-box');
 
   let thermalRows =
     tableRow('Thermal Inbreathing',  fmtVal(nv.thermal_in, fu)) +
@@ -692,6 +862,8 @@ function renderResults(result) {
       tableRow('Vapor Generation', fmtVal(ev.vapour_mass_flow, o.mass_unit)) +
       tableRow('Required Emergency Venting', fmtVal(ev.required, fu), true));
   }
+
+  if (o.scenarios.length > 0) html += renderScenarioResults(o);
 
   if (o.actual_venting && o.actual_venting.devices.length > 0) html += renderDevices(o);
 

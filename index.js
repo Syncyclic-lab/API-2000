@@ -10,7 +10,7 @@
 (function () {
   const {
     uc, engine, PHYSICAL, AIR_PROPERTIES: AIR, OPEN_VENT,
-    GENERAL_METHOD: GEN, ANNEX_A, FIRE, MAX_SCOPE_PRESSURE_KPA, CONVERSIONS,
+    GENERAL_METHOD: GEN, ANNEX_A, FIRE, MAX_SCOPE_PRESSURE_KPA, CONVERSIONS, SCENARIOS: SC,
   } = window.API2000;
 
   const METHOD_LABELS = {
@@ -25,6 +25,202 @@
   const isFraction = (v) => isNonNegative(v) && v <= 1;
   const relievesOut = (d) => d.direction !== 'INBREATHING';
   const relievesIn  = (d) => d.direction !== 'OUTBREATHING';
+
+  // --- Other circumstances (§3.2.5) -------------------------------------------
+  // API 2000 provides no calculation methods for these (§3.2.5.1). Each `calc`
+  // returns { out, in } in Nm³/h of air-equivalent flow; `x.need` records
+  // missing inputs. `replacesThermal` scenarios combine only with liquid
+  // movement when marked coincident with normal venting.
+
+  // Unit converter (uc.*) for each scenario input, by field name.
+  const SCENARIO_FIELD_UNITS = {
+    failed_inflow: 'toM3', failed_outflow: 'toM3', volatile_flow: 'toM3',
+    supply_pressure: 'toKpa', rate: 'toKpa',
+    diameter: 'smallLengthToM',
+    known_flow: 'toNm3hr', vacuum_flow: 'toNm3hr',
+    heat_input: 'toW', gas_generation: 'toKgH', density: 'toKgM3',
+    gas_temp: 'toC', vapor_temp: 'toC', wall_temp: 'toC',
+    exposed_area: 'toM2', htc: 'insulHTCToSI',
+  };
+
+  const SCENARIO_DEFS = {
+    control_valve_failure: {
+      label: 'Control valve failure', ref: '§3.2.5.12',
+      // Increase over the normal maximum fill / empty rate.
+      calc: (d, x) => {
+        x.need(d.failed_inflow != null || d.failed_outflow != null, 'enter the liquid inflow and/or outflow with the valve failed open');
+        return {
+          out: Math.max(0, (d.failed_inflow ?? 0) - x.fluid.fill_m3hr) * x.fillFactor,
+          in:  Math.max(0, (d.failed_outflow ?? 0) - x.fluid.empty_m3hr) * x.emptyFactor,
+        };
+      },
+    },
+    blanket_gas_equipment_failure: {
+      label: 'Blanket gas equipment failure', ref: '§3.2.5.3',
+      // Supply regulator failed open; back-pressure regulator failed open to vapor recovery.
+      calc: (d, x) => ({ out: x.gasInflow(d), in: d.vacuum_flow ?? 0 }),
+    },
+    abnormal_heat_transfer: {
+      label: 'Abnormal heat transfer', ref: '§3.2.5.4',
+      calc: (d, x) => {
+        x.need(d.heat_input > 0, 'enter the uncontrolled heat input');
+        return { out: x.vaporFromHeat(d.heat_input), in: 0 };
+      },
+    },
+    internal_heat_exchanger_failure: {
+      label: 'Internal heat exchanger failure', ref: '§3.2.5.5',
+      // Double-ended rupture of one tube releasing the medium as gas.
+      calc: (d, x) => {
+        x.need(d.gas_temp != null, 'enter the heating/cooling medium temperature');
+        return { out: x.gasInflow(d, { k: d.k ?? SC.STEAM_K, ends: 2 }), in: 0 };
+      },
+    },
+    uninsulated_hot_tank_in_rain: {
+      label: 'Uninsulated hot tank in rain', ref: '§3.2.5.14', replacesThermal: true,
+      calc: (d, x) => {
+        const { tank } = x;
+        const area = d.exposed_area ?? engine.calcExposedArea(tank.shape, tank.diameter_m, tank.length_m);
+        x.need(area > 0, 'enter the exposed shell and roof area (or the tank dimensions)');
+        x.need(d.vapor_temp != null, 'enter the vapor-space temperature');
+        if (!(area > 0) || d.vapor_temp == null) return { out: 0, in: 0 };
+        const deltaT = d.vapor_temp - (d.wall_temp ?? SC.RAIN_WALL_TEMP_C);
+        return {
+          out: 0,
+          in: engine.calcHotTankInbreathing(area, d.htc ?? GEN.H_INSIDE_DEFAULT, deltaT, d.vapor_temp + PHYSICAL.C_TO_K),
+        };
+      },
+    },
+    exothermic_reaction: {
+      label: 'Exothermic reaction', ref: '§3.2.5.9',
+      calc: (d, x) => {
+        x.need(d.heat_input > 0 || d.gas_generation > 0, 'enter the reaction heat release and/or gas generation rate');
+        let out = d.heat_input > 0 ? x.vaporFromHeat(d.heat_input) : 0;
+        if (d.gas_generation > 0) {
+          x.need(d.gas_mw > 0, 'enter the molecular weight of the generated gas');
+          if (d.gas_mw > 0) out += engine.airEquivalentFlow(d.gas_generation, d.gas_mw, x.ventTempK);
+        }
+        return { out, in: 0 };
+      },
+    },
+    mixing_of_products: {
+      label: 'Mixing of products', ref: '§3.2.5.16',
+      // Vapour flashed from a more-volatile material entering the tank.
+      calc: (d, x) => {
+        const ok = d.volatile_flow > 0 && d.density > 0 && d.flash_percent > 0 && d.flash_percent <= 100 && d.gas_mw > 0;
+        x.need(ok, 'enter the volatile inflow, liquid density, fraction vaporized (0–100 %) and vapor molecular weight');
+        if (!ok) return { out: 0, in: 0 };
+        const vapourKgH = d.volatile_flow * d.density * d.flash_percent / 100;
+        return { out: engine.airEquivalentFlow(vapourKgH, d.gas_mw, x.ventTempK), in: 0 };
+      },
+    },
+    liquid_overfill: {
+      label: 'Liquid overfill', ref: '§3.2.5.10',
+      // Vents are not overfill protection; this scenario only checks that protection exists.
+      calc: () => ({ out: 0, in: 0 }),
+    },
+    pressure_transfer_vapor_breakthrough: {
+      label: 'Pressure transfer / vapor breakthrough', ref: '§3.2.5.2',
+      calc: (d, x) => ({ out: x.gasInflow(d), in: 0 }),
+    },
+    atmospheric_pressure_change: {
+      label: 'Atmospheric pressure change', ref: '§3.2.5.11',
+      calc: (d, x) => {
+        x.need(d.rate > 0, 'enter the barometric pressure change rate');
+        const q = d.rate > 0 ? engine.calcBarometricBreathing(x.tank.volume_m3, d.rate, x.ventTempK) : 0;
+        return { out: q, in: q };
+      },
+    },
+  };
+
+  function scenariosToSI(scenarios = {}, us) {
+    const out = {};
+    for (const [key, raw] of Object.entries(scenarios)) {
+      if (!raw || !raw.enabled) continue;
+      const d = { ...raw };
+      for (const [field, fn] of Object.entries(SCENARIO_FIELD_UNITS)) {
+        if (d[field] != null) d[field] = uc[fn](d[field], us);
+      }
+      out[key] = d;
+    }
+    return out;
+  }
+
+  function calcScenarios(s, normal) {
+    const errors = [];
+    const P_ATM = PHYSICAL.P_ATM_KPA;
+    const perUnit = engine.calcLiquidMovement(s.method, 1, 1, normal.is_volatile);
+    const ventTempK = (s.fluid.relieving_temp_C ?? s.fluid.operating_temp_C ?? AMBIENT_C) + PHYSICAL.C_TO_K;
+
+    const items = Object.entries(s.scenarios).filter(([key]) => SCENARIO_DEFS[key]).map(([key, d]) => {
+      const def = SCENARIO_DEFS[key];
+      const need = (ok, message) => { if (!ok) errors.push(`${def.label}: ${message}.`); };
+
+      // Gas entering the vapour space (Nm³/h of gas from a known flow or Annex D
+      // nozzle flow into the tank at MAWP), as air-equivalent vent flow.
+      const gasInflow = (g, { k = SC.GAS_K, ends = 1 } = {}) => {
+        need(g.gas_mw > 0, 'enter the gas molecular weight');
+        let gasNm3h = g.known_flow;
+        if (gasNm3h == null) {
+          need(g.supply_pressure > 0 && g.diameter > 0, 'enter the supply pressure and flow diameter, or a known gas flow');
+          gasNm3h = ends * engine.calculateOpenVentCapacity(
+            g.diameter, P_ATM + g.supply_pressure, P_ATM + s.tank.mawp_kpag, k,
+            (g.gas_temp ?? AMBIENT_C) + PHYSICAL.C_TO_K, g.gas_mw, 1, g.cd ?? SC.DEFAULT_CD);
+        }
+        return g.gas_mw > 0 ? engine.airEquivalentFlow(gasNm3h * g.gas_mw / PHYSICAL.MOLAR_VOL_NM3, g.gas_mw, ventTempK) : 0;
+      };
+      // Vapour generated by a heat input Q (W): W = Q / L.
+      const vaporFromHeat = (heatW) => {
+        const { latent_J_kg: L, molecular_weight: M } = s.fluid;
+        need(L > 0 && M > 0, 'enter the fluid latent heat and molecular weight (Fluid section)');
+        return L > 0 && M > 0 ? engine.airEquivalentFlow(heatW / L * PHYSICAL.SECONDS_PER_HOUR, M, ventTempK) : 0;
+      };
+
+      const load = def.calc(d, {
+        need, gasInflow, vaporFromHeat, ventTempK,
+        tank: s.tank, fluid: s.fluid, fillFactor: perUnit.liquid_out, emptyFactor: perUnit.liquid_in,
+      });
+      const base = def.replacesThermal
+        ? { out: normal.liquid_out, in: normal.liquid_in }
+        : { out: normal.total_out, in: normal.total_in };
+      const withNormal = (value, normalPart) => (value > 0 ? value + (d.coincident ? normalPart : 0) : 0);
+      return {
+        key,
+        label:       def.label,
+        ref:         def.ref,
+        relieved_by: d.relieved_by === 'EMERGENCY' ? 'EMERGENCY' : 'NORMAL',
+        coincident:  !!d.coincident,
+        out:         load.out,
+        in:          load.in,
+        total_out:   withNormal(load.out, base.out),
+        total_in:    withNormal(load.in, base.in),
+        input:       d,
+      };
+    });
+    return { items, errors };
+  }
+
+  // Largest single contingency per relief path (§3.3.1, §3.6.1).
+  function designBasis(normal, fireCase, items) {
+    const largest = (candidates) => candidates.reduce((a, b) => (b.value > a.value ? b : a));
+    const scenarioLoads = (filter, field) => items.filter(i => filter(i) && i[field] > 0)
+      .map(i => ({ value: i[field], basis: i.label }));
+
+    const normalOut = largest([
+      { value: normal.total_out, basis: 'Normal venting' },
+      ...scenarioLoads(i => i.relieved_by === 'NORMAL', 'total_out'),
+    ]);
+    const emergencyCandidates = [
+      ...(fireCase ? [{ value: fireCase.emergency_out, basis: 'Fire exposure' }] : []),
+      ...scenarioLoads(i => i.relieved_by === 'EMERGENCY', 'total_out'),
+    ];
+    const emergencyOut = emergencyCandidates.length > 0 ? largest(emergencyCandidates) : null;
+    const inbreathing = largest([
+      { value: normal.total_in, basis: 'Normal venting' },
+      ...scenarioLoads(() => true, 'total_in'),
+    ]);
+    const governingOut = emergencyOut && emergencyOut.value > normalOut.value ? emergencyOut : normalOut;
+    return { normalOut, emergencyOut, inbreathing, governingOut };
+  }
 
   // --- Input conversion and validation ---------------------------------------
 
@@ -69,8 +265,8 @@
         custom_factor:        fire.custom_factor ?? null,
         manual_wetted_m2:     c(uc.toM2, fire.manual_wetted_area),
       },
-      abnormal: p.abnormal_scenarios || {},
-      devices:  p.devices || [],
+      scenarios: scenariosToSI(p.scenarios, us),
+      devices:   p.devices || [],
     };
   }
 
@@ -205,7 +401,7 @@
 
   // --- Warnings ---------------------------------------------------------------
 
-  function collectWarnings(s, fireCase, actual, atmDefaultUsed) {
+  function collectWarnings(s, fireCase, actual, atmDefaultUsed, scenarios) {
     const out = [];
     const warn = (message) => out.push({ severity: 'WARNING', message });
     const notice = (message) => out.push({ severity: 'NOTICE', message });
@@ -235,12 +431,40 @@
       }
     }
 
-    const abnormal = Object.entries(s.abnormal)
-      .filter(([, v]) => v === true)
-      .map(([k]) => k.replace(/_/g, ' '));
-    if (abnormal.length > 0) {
-      notice(`These scenarios are selected but NOT included in the results: ${abnormal.join(', ')}. ` +
-        'Quantify these loads separately per API 2000 §3.2.5.');
+    // Other circumstances (§3.2.5)
+    if (scenarios.length > 0) {
+      notice('API 2000 gives no calculation methods for the §3.2.5 circumstances (§3.2.5.1). Their loads are ' +
+        'engineering estimates — gas inflow by isentropic nozzle flow (Annex D), vapour by Q/L — expressed as ' +
+        'air-equivalent flow (Eq. D.37). Verify them against the actual equipment.');
+    }
+    for (const item of scenarios) {
+      switch (item.key) {
+        case 'exothermic_reaction':
+          warn('Exothermic reaction: runaway kinetics and two-phase (foaming) relief are not modelled; ' +
+            'evaluate with DIERS methods (§3.2.5.9).');
+          break;
+        case 'internal_heat_exchanger_failure':
+          notice('Internal heat exchanger failure: the medium is treated as gas released from a double-ended tube ' +
+            'rupture. Condensation in the tank contents (lower load) and flashing of liquid media are not modelled (§3.2.5.5).');
+          break;
+        case 'uninsulated_hot_tank_in_rain':
+          notice('Uninsulated hot tank: condensation of condensable vapours (e.g. steam) is not included and can ' +
+            'increase the inbreathing load (§3.2.5.13, §3.2.5.14).');
+          break;
+        case 'liquid_overfill':
+          if (item.input.protection_provided) {
+            notice('Liquid overfill: tank vents are not overfill protection (§3.2.5.10); the independent overfill protection indicated is relied on.');
+          } else {
+            warn('Liquid overfill: tank vents must not be used for overfill protection (§3.2.5.10). ' +
+              'Provide overfill protection per API 2350, API 2510 or EN 13616.');
+          }
+          break;
+        case 'atmospheric_pressure_change':
+          notice('Atmospheric pressure change is usually insignificant for nonrefrigerated tanks (§3.2.5.11).');
+          break;
+        default:
+          break;
+      }
     }
 
     // Emergency venting
@@ -340,7 +564,9 @@
       const { us, method, tank } = s;
       const normal   = calcNormalVenting(s);
       const fireCase = s.fire.include ? calcFireCase(s) : null;
-      const emergencyOut = fireCase ? fireCase.emergency_out : 0;
+      const scenarios = calcScenarios(s, normal);
+      if (scenarios.errors.length > 0) return { errors: scenarios.errors, warnings: [] };
+      const design = designBasis(normal, fireCase, scenarios.items);
 
       let actual = null;
       let atmDefaultUsed = false;
@@ -357,11 +583,10 @@
         });
       }
 
-      const warnings = collectWarnings(s, fireCase, actual, atmDefaultUsed);
+      const warnings = collectWarnings(s, fireCase, actual, atmDefaultUsed, scenarios.items);
 
       // --- Output in display units ---
       const flow = (nm3hr) => round(uc.flowToOutput(nm3hr, us), 1);
-      const governingOut = Math.max(normal.total_out, emergencyOut);
       const meta = inputs.meta;
 
       const outputs = {
@@ -402,10 +627,32 @@
           vapour_mass_flow:   round(uc.massToOutput(fireCase.vapour_mass_flow_kg_hr, us), 1),
         } : null,
 
+        scenarios: scenarios.items.map(i => ({
+          label:       i.label,
+          ref:         i.ref,
+          relieved_by: i.relieved_by,
+          coincident:  i.coincident,
+          out:         flow(i.out),
+          in:          flow(i.in),
+          total_out:   flow(i.total_out),
+          total_in:    flow(i.total_in),
+        })),
+
+        // Design requirement for each relief path, with the contingency that sets it.
+        design: {
+          normal_out:          flow(design.normalOut.value),
+          normal_out_basis:    design.normalOut.basis,
+          emergency_out:       design.emergencyOut ? flow(design.emergencyOut.value) : null,
+          emergency_out_basis: design.emergencyOut ? design.emergencyOut.basis : null,
+          inbreathing:         flow(design.inbreathing.value),
+          inbreathing_basis:   design.inbreathing.basis,
+        },
+
         governing: {
-          outbreathing:      flow(governingOut),
-          inbreathing:       flow(normal.total_in),
-          emergency_governs: emergencyOut > normal.total_out,
+          outbreathing:       flow(design.governingOut.value),
+          outbreathing_basis: design.governingOut.basis,
+          inbreathing:        flow(design.inbreathing.value),
+          inbreathing_basis:  design.inbreathing.basis,
         },
 
         actual_venting: actual ? {
@@ -413,9 +660,9 @@
           emergency_out: flow(actual.emergency_out),
           inbreathing:   flow(actual.inbreathing),
           adequacy: {
-            normal_out:    actual.normal_out >= normal.total_out,
-            emergency_out: fireCase ? actual.emergency_out >= fireCase.emergency_out : null,
-            inbreathing:   actual.inbreathing >= normal.total_in,
+            normal_out:    actual.normal_out >= design.normalOut.value,
+            emergency_out: design.emergencyOut ? actual.emergency_out >= design.emergencyOut.value : null,
+            inbreathing:   actual.inbreathing >= design.inbreathing.value,
           },
           devices: actual.devices.map(d => ({
             type:      d.type,
@@ -460,6 +707,10 @@
           ['Relieving temperature T',       round(fireCase.T_K, 2),            'K'],
           ['Emergency venting (Eq. 14)',    round(fireCase.emergency_out, 1),  'Nm³/h'],
         );
+      }
+      for (const i of scenarios.items) {
+        if (i.out > 0) intermediates.push([`${i.label} — out-breathing load`, round(i.out, 2), 'Nm³/h']);
+        if (i.in > 0)  intermediates.push([`${i.label} — inbreathing load`, round(i.in, 2), 'Nm³/h']);
       }
 
       return { outputs, intermediates, warnings, errors: [] };

@@ -178,6 +178,21 @@
     }
     .insulation-fields.visible { display: block; }
 
+    /* ── Other-circumstance scenarios ─────────── */
+    .section-note { font-size: 0.8rem; color: var(--gray-600); margin-bottom: 10px; }
+    .ref { color: var(--gray-400); font-family: var(--mono); font-size: 0.75rem; margin-left: 4px; }
+    .scenario-body {
+      display: none;
+      margin: 8px 0 4px 24px;
+      padding: 12px 14px;
+      background: var(--gray-50);
+      border: 1px solid var(--gray-200);
+      border-radius: 6px;
+    }
+    .scenario.enabled .scenario-body { display: block; }
+    .scenario-body > .hint { font-size: 0.75rem; color: var(--gray-600); margin-bottom: 10px; }
+    .scenario-body .check-item { grid-column: 1 / -1; }
+
     /* ── Disclaimer ──────────────────────────── */
     .disclaimer-box {
       margin-top: 24px;
@@ -924,18 +939,11 @@
 
           <!-- ══ ABNORMAL SCENARIOS ══ -->
           <div class="section-title">Other Circumstances (§3.2.5)</div>
-          <div class="check-list">
-            <label class="check-item"><input type="checkbox" id="ab_controlValve"><span>Control valve failure</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_blanketGas"><span>Blanket gas equipment failure</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_abnormalHeat"><span>Abnormal heat transfer</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_heatExchanger"><span>Internal heat exchanger failure</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_hotTankRain"><span>Uninsulated hot tank in rain</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_exothermic"><span>Exothermic reaction</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_mixing"><span>Mixing of products</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_overfill"><span>Liquid overfill</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_vaporBreak"><span>Pressure transfer / vapor breakthrough</span></label>
-            <label class="check-item"><input type="checkbox" id="ab_atmChange"><span>Atmospheric pressure change</span></label>
-          </div>
+          <p class="section-note">
+            Select the scenarios that apply and enter their data. API 2000 gives no calculation methods for these
+            (§3.2.5.1); loads are engineering estimates and the largest contingency on each relief path governs.
+          </p>
+          <div id="scenarioList" class="check-list"></div>
 
           <!-- ══ EMERGENCY VENTING ══ -->
           <div class="section-title">Emergency Venting — Fire Exposure (§3.3.3)</div>
