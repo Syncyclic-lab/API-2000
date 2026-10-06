@@ -1006,6 +1006,36 @@ function setField(el, value) {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+// Every §3.2.5 circumstance, in SI display units (the example selects SI).
+// Fields not listed are cleared; large upsets are routed to the emergency valve.
+const EXAMPLE_SCENARIOS = {
+  control_valve_failure:                { failed_inflow: 300, failed_outflow: 250, coincident: true, relieved_by: 'NORMAL' },
+  blanket_gas_equipment_failure:        { supply_pressure: 700, diameter: 6, cd: 0.62, gas_mw: 28.01, vacuum_flow: 80,
+                                          coincident: true, relieved_by: 'NORMAL' },
+  abnormal_heat_transfer:               { heat_input: 150, relieved_by: 'NORMAL' },
+  internal_heat_exchanger_failure:      { supply_pressure: 1000, gas_temp: 184, diameter: 20, cd: 0.62, gas_mw: 18.02, k: 1.33,
+                                          relieved_by: 'EMERGENCY' },
+  uninsulated_hot_tank_in_rain:         { vapor_temp: 65, coincident: true },
+  exothermic_reaction:                  { heat_input: 300, gas_generation: 250, gas_mw: 44.01, relieved_by: 'NORMAL' },
+  mixing_of_products:                   { volatile_flow: 10, density: 650, flash_percent: 5, gas_mw: 58.12, relieved_by: 'NORMAL' },
+  liquid_overfill:                      { protection_provided: true },
+  pressure_transfer_vapor_breakthrough: { supply_pressure: 500, diameter: 50, cd: 0.62, gas_mw: 28.01, relieved_by: 'EMERGENCY' },
+  atmospheric_pressure_change:          { rate: 0.5, coincident: true, relieved_by: 'NORMAL' },
+};
+
+function loadExampleScenarios() {
+  for (const [key, data] of Object.entries(EXAMPLE_SCENARIOS)) {
+    const el = document.querySelector(`#scenarioList [data-scenario="${key}"]`);
+    setField(el.querySelector('.sc-enabled'), true);
+    el.querySelectorAll('[data-sc-field]').forEach(input => {
+      const value = data[input.dataset.scField];
+      if (input.type === 'checkbox') setField(input, !!value);
+      else if (input.tagName === 'SELECT') { if (value != null) setField(input, value); }
+      else setField(input, value ?? '');
+    });
+  }
+}
+
 function loadExample() {
   const values = {
     unitSystem: 'SI', ventMethod: 'GENERAL', tagNumber: 'EX-101', projectName: 'Worked example', preparedBy: '',
@@ -1016,7 +1046,7 @@ function loadExample() {
   };
   for (const [id, v] of Object.entries(values)) setField($(id), v);
   setField($('opt_fireCaseEnabled'), true);
-  document.querySelectorAll('#scenarioList .sc-enabled:checked').forEach(cb => setField(cb, false));
+  loadExampleScenarios();
 
   // A gooseneck behind a flame arrestor, plus an emergency relief valve for the fire case.
   deviceRoster.innerHTML = '';
@@ -1048,8 +1078,8 @@ function loadExample() {
       ${ICONS.pass}
       <h3 class="results-heading" id="resultsHeading" tabindex="-1">Example tank loaded</h3>
       <p>A 785 m³ vertical tank (MAWP 3.5 kPa, MAWV 0.5 kPa) with a gooseneck vent behind a flame arrestor and an
-        emergency relief valve is now filled in. Review or edit the inputs, then tick the acknowledgement and run
-        the calculation.</p>
+        emergency relief valve is now filled in, together with all ten §3.2.5 other circumstances (step 5).
+        Review or edit the inputs, then tick the acknowledgement and run the calculation.</p>
       <button type="button" class="btn btn-primary" id="btnGoRun">Go to Run calculation</button>
     </div>`;
   announce('Example tank loaded into the form. Tick the acknowledgement and run the calculation.');
