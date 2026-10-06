@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <title>Accessibility statement — API 2000 Venting Calculator</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="./">
+        <img class="brand-mark" src="favicon.svg" width="40" height="40" alt="">
+        <span class="brand-title">API 2000 Venting Calculator</span>
+      </a>
+    </div>
+  </header>
+
+  <main id="main">
+    <article class="doc">
+      <a class="back-link" href="./">← Back to the calculator</a>
+      <h1>Accessibility statement</h1>
+      <p class="doc-meta">Prepared 6 October 2026</p>
+
+      <p>We want the API 2000 Venting Calculator to be usable by everyone, including people who use a keyboard,
+        screen reader, magnification or high-contrast settings.</p>
+
+      <h2>Standard</h2>
+      <p>We aim to conform to the Web Content Accessibility Guidelines (WCAG) 2.1 at Level AA, the level referenced by
+        EN 301 549 in Europe and generally applied under the Americans with Disabilities Act and Canadian
+        accessibility laws.</p>
+
+      <h2>Conformance status</h2>
+      <p><strong>Partially conformant.</strong> Most of the site meets WCAG 2.1 AA; the known exceptions are listed
+        below.</p>
+
+      <h2>What we have done</h2>
+      <ul>
+        <li>Every form field has a visible label that is linked to it, and hints are linked as descriptions.</li>
+        <li>Text and form-control borders meet the WCAG contrast ratios in light and dark themes.</li>
+        <li>Everything works with a keyboard, with a visible focus indicator and a “skip to calculator” link.</li>
+        <li>The input tabs follow the WAI-ARIA tabs pattern, and pass/fail results are shown in words, not only colour.</li>
+        <li>When a calculation finishes, the outcome is announced to screen readers and focus moves to the results.</li>
+        <li>The layout reflows at 320 px width and at 200–400 % zoom; motion is reduced if you ask your system for it.</li>
+      </ul>
+
+      <h2>Known limitations</h2>
+      <ul>
+        <li>Wide results tables scroll horizontally on small screens.</li>
+        <li>Engineering notation (symbols such as ΔP, Rᵢ and section references) may be read inconsistently by
+          some screen readers.</li>
+        <li>The calculator needs JavaScript. The legal and information pages do not.</li>
+        <li>We have tested with automated checks, keyboard-only use and browser accessibility tools. We have not yet
+          completed testing with every major screen reader.</li>
+      </ul>
+
+      <h2>Feedback</h2>
+      <p>If you meet a barrier or need results in another format, contact us at
+        <mark class="todo">[contact email address]</mark>. We aim to reply within 10 working days.</p>
+
+      <h2>How we assessed this site</h2>
+      <p>Self-evaluation by the operator, using automated contrast and markup checks, keyboard testing and manual
+        review against WCAG 2.1 AA, on 6 October 2026.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <nav aria-label="Legal and information">
+        <ul class="footer-links">
+          <li><a href="./">Calculator</a></li>
+          <li><a href="legal.html">Legal notice</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="terms.html">Terms of use</a></li>
+          <li><a href="accessibility.html" aria-current="page">Accessibility</a></li>
+        </ul>
+      </nav>
+      <p class="footer-fine">© 2026 Syncyclic-lab</p>
+    </div>
+  </footer>
+</body>
+</html>
