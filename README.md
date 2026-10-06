@@ -27,6 +27,13 @@ US units are converted to SI at the input boundary; flows convert at
 - `flameArrestor.js` — flame-arrestor ΔP module
 - `index.js` — validation, orchestration and warnings (`window.API2000.runCalculation`)
 - `app.js`, `index.html` — user interface
+- `styles.css` — shared styles for every page (light/dark themes, print layout, system fonts)
+- `legal.html`, `privacy.html`, `terms.html`, `accessibility.html` — legal notice, privacy notice, terms of use
+  and accessibility statement
+
+The site loads nothing from third parties and sets no cookies or browser storage, so it needs no consent
+banner. Keep it that way, or update `privacy.html` (and add consent) before adding analytics, web fonts or
+embeds. The Content-Security-Policy in each page enforces this (`default-src 'none'`, no inline styles or scripts).
 
 ## Tests
 

@@ -47,7 +47,7 @@ const UNIT_CLASS_MAP = {
 // --- DOM references ---------------------------------------------------------
 
 const $ = (id) => document.getElementById(id);
-const show = (el, visible) => { if (el) el.style.display = visible ? '' : 'none'; };
+const show = (el, visible) => { if (el) el.hidden = !visible; };
 const form             = $('calcForm');
 const disclaimerCheck  = $('disclaimerCheck');
 const calcBtn          = $('calcBtn');
@@ -57,15 +57,25 @@ const unitSystemSelect = $('unitSystem');
 const ventMethod       = $('ventMethod');
 const vaporPressure    = $('vaporPressureClass');
 
-// --- Tab switching ----------------------------------------------------------
+// --- Tab switching (WAI-ARIA tabs: roving tabindex, arrow/Home/End keys) -----
 
-document.querySelectorAll('.tab-button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
-    btn.classList.add('active');
-    const target = document.getElementById(btn.dataset.tab);
-    if (target) target.classList.add('active');
+const tabButtons = [...document.querySelectorAll('[role="tab"]')];
+function selectTab(btn, focus) {
+  tabButtons.forEach(b => {
+    const selected = b === btn;
+    b.setAttribute('aria-selected', String(selected));
+    b.tabIndex = selected ? 0 : -1;
+    $(b.getAttribute('aria-controls')).hidden = !selected;
+  });
+  if (focus) btn.focus();
+}
+tabButtons.forEach((btn, i) => {
+  btn.addEventListener('click', () => selectTab(btn, false));
+  btn.addEventListener('keydown', (e) => {
+    const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabButtons.length - 1 }[e.key];
+    if (next == null) return;
+    e.preventDefault();
+    selectTab(tabButtons[(next + tabButtons.length) % tabButtons.length], true);
   });
 });
 
@@ -84,7 +94,7 @@ function buildArrestorRefRows() {
       <td>${row.label}</td>
       <td class="k-range">${row.k_low}&nbsp;–&nbsp;${row.k_high}</td>
       <td class="k-range">${row.k_default}</td>
-      <td><button type="button" class="btn-use-default" data-fa-use-default="${key}">Use default</button></td>
+      <td><button type="button" class="btn btn-secondary btn-small" data-fa-use-default="${key}" aria-label="Use default K ${row.k_default} for ${row.label}">Use</button></td>
     </tr>
   `).join('');
 }
@@ -104,115 +114,114 @@ function renderDeviceRow() {
   card.className = 'device-card';
   card.id = `device-card-${id}`;
 
+  const uid = (name) => `dev${id}-${name}`;
+  card.setAttribute('role', 'group');
+  card.setAttribute('aria-labelledby', uid('label'));
+
   card.innerHTML = `
     <div class="device-card-header">
-      <span class="device-label">Device #${id}</span>
-      <button type="button" class="btn-remove-device" data-remove-device="${id}">Remove</button>
+      <span class="device-label" id="${uid('label')}">Device #${id}</span>
+      <button type="button" class="btn-danger-link" data-remove-device="${id}" aria-describedby="${uid('label')}">Remove</button>
     </div>
     <div class="field-grid">
       <div class="field">
-        <label>Device Type</label>
-        <select class="dev-type">
-          <option value="PVRV">Normal PVRV / Breather Valve</option>
-          <option value="EPRV">Emergency Relief Valve (EPRV)</option>
-          <option value="FREE_VENT">Free Vent / Gooseneck</option>
+        <label for="${uid('type')}">Device type</label>
+        <select class="dev-type" id="${uid('type')}">
+          <option value="PVRV">Normal PVRV / breather valve</option>
+          <option value="EPRV">Emergency relief valve (EPRV)</option>
+          <option value="FREE_VENT">Free vent / gooseneck</option>
         </select>
       </div>
       <div class="field">
-        <label>Relief Direction</label>
-        <select class="dev-direction">
-          <option value="BOTH">Outbreathing &amp; Inbreathing</option>
-          <option value="OUTBREATHING">Outbreathing (Pressure) Only</option>
-          <option value="INBREATHING">Inbreathing (Vacuum) Only</option>
+        <label for="${uid('dir')}">Relief direction</label>
+        <select class="dev-direction" id="${uid('dir')}">
+          <option value="BOTH">Outbreathing &amp; inbreathing</option>
+          <option value="OUTBREATHING">Outbreathing (pressure) only</option>
+          <option value="INBREATHING">Inbreathing (vacuum) only</option>
         </select>
       </div>
-      <div class="field dev-field-capacity-source" style="display:none;">
-        <label>Capacity Source</label>
-        <div class="radio-group">
-          <label class="radio-item"><input type="radio" name="cap-src-${id}" class="dev-cap-src" value="manufacturer" checked><span>Manufacturer Rated</span></label>
-          <label class="radio-item"><input type="radio" name="cap-src-${id}" class="dev-cap-src" value="calculated"><span>Calculate from Pipe Geometry (Annex D nozzle flow)</span></label>
+      <div class="field full-width dev-field-capacity-source" hidden>
+        <span class="label" id="${uid('src')}">Capacity source</span>
+        <div class="radio-group" role="radiogroup" aria-labelledby="${uid('src')}">
+          <label class="radio-item"><input type="radio" name="cap-src-${id}" class="dev-cap-src" value="manufacturer" checked><span>Manufacturer rated</span></label>
+          <label class="radio-item"><input type="radio" name="cap-src-${id}" class="dev-cap-src" value="calculated"><span>Calculate from pipe geometry (Annex D nozzle flow)</span></label>
         </div>
       </div>
       <div class="field dev-field-sp">
-        <label>Set Pressure <span class="unit press-unit"></span></label>
-        <input type="number" step="any" min="0" class="dev-sp" placeholder="e.g. 0.5">
-        <div class="hint">Pressure at which valve opens</div>
+        <label for="${uid('sp')}">Set pressure <span class="unit press-unit"></span></label>
+        <input type="number" step="any" min="0" inputmode="decimal" class="dev-sp" id="${uid('sp')}" placeholder="e.g. 0.5" aria-describedby="${uid('sp-hint')}">
+        <p class="hint" id="${uid('sp-hint')}">Pressure at which the valve opens</p>
       </div>
       <div class="field dev-field-sv">
-        <label>Set Vacuum <span class="unit press-unit"></span></label>
-        <input type="number" step="any" min="0" class="dev-sv" placeholder="e.g. 0.2">
-        <div class="hint">Vacuum at which valve opens</div>
+        <label for="${uid('sv')}">Set vacuum <span class="unit press-unit"></span></label>
+        <input type="number" step="any" min="0" inputmode="decimal" class="dev-sv" id="${uid('sv')}" placeholder="e.g. 0.2" aria-describedby="${uid('sv-hint')}">
+        <p class="hint" id="${uid('sv-hint')}">Vacuum at which the valve opens</p>
       </div>
       <div class="field dev-field-flow-out">
-        <label>Rated Outbreathing Flow <span class="unit flow-unit"></span></label>
-        <input type="number" step="any" min="0" class="dev-flow-out">
+        <label for="${uid('flow-out')}">Rated outbreathing flow <span class="unit flow-unit"></span></label>
+        <input type="number" step="any" min="0" inputmode="decimal" class="dev-flow-out" id="${uid('flow-out')}">
       </div>
       <div class="field dev-field-flow-in">
-        <label>Rated Inbreathing Flow <span class="unit flow-unit"></span></label>
-        <input type="number" step="any" min="0" class="dev-flow-in">
+        <label for="${uid('flow-in')}">Rated inbreathing flow <span class="unit flow-unit"></span></label>
+        <input type="number" step="any" min="0" inputmode="decimal" class="dev-flow-in" id="${uid('flow-in')}">
       </div>
       <div class="field dev-field-overpressure">
-        <label>Rated at Overpressure <span class="unit">%</span></label>
-        <input type="number" step="any" min="0" class="dev-overpressure" value="10" placeholder="e.g. 10 or 100">
-        <div class="hint">Flow capacity rated at this % above set point</div>
+        <label for="${uid('op')}">Rated at overpressure <span class="unit">%</span></label>
+        <input type="number" step="any" min="0" inputmode="decimal" class="dev-overpressure" id="${uid('op')}" value="10" placeholder="e.g. 10 or 100" aria-describedby="${uid('op-hint')}">
+        <p class="hint" id="${uid('op-hint')}">Flow capacity is rated at this % above the set point</p>
       </div>
-      <div class="field dev-field-pipe-diam" style="display:none;">
-        <label>Pipe Inner Diameter <span class="unit pipe-diam-unit"></span></label>
-        <input type="number" step="any" min="0" class="dev-pipe-diam">
-        <div class="hint">Internal diameter of the vent pipe</div>
+      <div class="field dev-field-pipe-diam" hidden>
+        <label for="${uid('pipe')}">Pipe inner diameter <span class="unit pipe-diam-unit"></span></label>
+        <input type="number" step="any" min="0" inputmode="decimal" class="dev-pipe-diam" id="${uid('pipe')}">
       </div>
-      <div class="field dev-field-cd" style="display:none;">
-        <label>Coefficient of Discharge (C<sub>d</sub>)</label>
-        <input type="number" step="0.01" min="0" max="1" class="dev-cd" value="0.5">
-        <div class="hint">Typical range: 0.3–0.8 for pipe fittings</div>
+      <div class="field dev-field-cd" hidden>
+        <label for="${uid('cd')}">Discharge coefficient (C<sub>d</sub>)</label>
+        <input type="number" step="0.01" min="0" max="1" inputmode="decimal" class="dev-cd" id="${uid('cd')}" value="0.5" aria-describedby="${uid('cd-hint')}">
+        <p class="hint" id="${uid('cd-hint')}">Typical range 0.3–0.8 for pipe fittings</p>
       </div>
     </div>
 
-    <!-- ── Flame arrestor sub-block (optional, default off) ─────────── -->
     <div class="arrestor-block" data-fa-block>
       <label class="arrestor-toggle">
         <input type="checkbox" class="fa-enabled">
         <span>This device has a flame arrestor (ISO 16852)</span>
       </label>
       <div class="arrestor-body">
-        <div class="arrestor-note">
+        <p class="arrestor-note">
           Reference K-values are generic approximations. For regulatory sizing,
           use the manufacturer's certified ΔP-vs-Q capacity curve (ISO 16852).
+        </p>
+        <div class="table-wrap">
+          <table class="arrestor-ref-table">
+            <caption class="visually-hidden">Reference K-values by arrestor class</caption>
+            <thead>
+              <tr><th scope="col">Arrestor class</th><th scope="col">Typical K</th><th scope="col">Default</th><th scope="col"><span class="visually-hidden">Action</span></th></tr>
+            </thead>
+            <tbody>${buildArrestorRefRows()}</tbody>
+          </table>
         </div>
-        <table class="arrestor-ref-table" aria-label="Reference K-values">
-          <thead>
-            <tr>
-              <th>Arrestor class</th>
-              <th>Typical K</th>
-              <th>Default</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>${buildArrestorRefRows()}</tbody>
-        </table>
         <div class="field-grid">
           <div class="field">
-            <label>Arrestor Class</label>
-            <select class="fa-class">
+            <label for="${uid('fa-class')}">Arrestor class</label>
+            <select class="fa-class" id="${uid('fa-class')}" aria-describedby="${uid('fa-class-hint')}">
               ${buildArrestorClassOptions()}
             </select>
-            <div class="hint">Selecting a class pre-fills K (editable).</div>
+            <p class="hint" id="${uid('fa-class-hint')}">Selecting a class pre-fills K (editable).</p>
           </div>
           <div class="field">
-            <label>Resistance Coefficient (K) <span class="unit">dimensionless</span></label>
-            <input type="number" class="fa-k" step="0.1" min="0.1" value="3.5">
-            <div class="hint">Override with manufacturer value if available.</div>
+            <label for="${uid('fa-k')}">Resistance coefficient K <span class="unit">dimensionless</span></label>
+            <input type="number" class="fa-k" id="${uid('fa-k')}" step="0.1" min="0.1" inputmode="decimal" value="3.5" aria-describedby="${uid('fa-k-hint')}">
+            <p class="hint" id="${uid('fa-k-hint')}">Override with the manufacturer's value if available.</p>
           </div>
           <div class="field">
-            <label>Nominal Inside Diameter
-              <span class="diam-unit-toggle" data-fa-diam-toggle>
-                <button type="button" data-fa-diam-unit="mm" class="active">mm</button>
-                <button type="button" data-fa-diam-unit="in">in</button>
-                <button type="button" data-fa-diam-unit="m">m</button>
+            <label for="${uid('fa-d')}">Nominal inside diameter <span class="unit" data-fa-diam-label>mm</span></label>
+            <input type="number" class="fa-diameter" id="${uid('fa-d')}" step="any" min="0" inputmode="decimal" value="101.6" aria-describedby="${uid('fa-d-hint')}">
+            <div class="hint" id="${uid('fa-d-hint')}">
+              <span class="diam-unit-toggle" role="group" aria-label="Arrestor diameter unit" data-fa-diam-toggle>
+                <button type="button" data-fa-diam-unit="mm" aria-pressed="true">mm</button><button type="button" data-fa-diam-unit="in" aria-pressed="false">in</button><button type="button" data-fa-diam-unit="m" aria-pressed="false">m</button>
               </span>
-            </label>
-            <input type="number" class="fa-diameter" step="any" min="0" value="101.6">
-            <div class="hint">Default 4" (101.6 mm). Set to the arrestor's nominal ID.</div>
+              Default 4" (101.6 mm)
+            </div>
           </div>
         </div>
       </div>
@@ -229,7 +238,7 @@ function renderDeviceRow() {
 function getArrestorDiameterMetres(card) {
   const v = parseFloat(card.querySelector('.fa-diameter').value);
   if (isNaN(v) || v <= 0) return null;
-  const activeBtn = card.querySelector('[data-fa-diam-toggle] button.active');
+  const activeBtn = card.querySelector('[data-fa-diam-toggle] button[aria-pressed="true"]');
   const unit = activeBtn ? activeBtn.dataset.faDiamUnit : 'mm';
   const C = window.API2000.CONVERSIONS;
   if (unit === 'in') return v * C.IN_TO_M;
@@ -339,7 +348,8 @@ deviceRoster.addEventListener('click', (e) => {
   const diamBtn = e.target.closest('[data-fa-diam-unit]');
   if (diamBtn) {
     diamBtn.closest('[data-fa-diam-toggle]').querySelectorAll('button')
-      .forEach(b => b.classList.toggle('active', b === diamBtn));
+      .forEach(b => b.setAttribute('aria-pressed', String(b === diamBtn)));
+    diamBtn.closest('.field').querySelector('[data-fa-diam-label]').textContent = diamBtn.dataset.faDiamUnit;
   }
 });
 
@@ -438,35 +448,37 @@ const SCENARIO_UI = [
 
 const UNIT_KEY_CLASS = Object.fromEntries(Object.entries(UNIT_CLASS_MAP).map(([cls, key]) => [key, cls]));
 
-function scenarioField(f) {
+// Static, developer-controlled content (labels and hints are not user input).
+function scenarioField(sc, f) {
   if (f.type === 'checkbox') {
     return `<label class="check-item"><input type="checkbox" data-sc-field="${f.name}"><span>${f.label}</span></label>`;
   }
+  const id = `sc-${sc.key}-${f.name}`;
   const unit = f.unit ? `<span class="unit ${UNIT_KEY_CLASS[f.unit]}"></span>` : (f.unitText ? `<span class="unit">${f.unitText}</span>` : '');
   return `
     <div class="field">
-      <label>${f.label} ${unit}</label>
-      <input type="number" step="any" data-sc-field="${f.name}"${f.value != null ? ` value="${f.value}"` : ''}>
-      ${f.hint ? `<div class="hint">${f.hint}</div>` : ''}
+      <label for="${id}">${f.label} ${unit}</label>
+      <input type="number" step="any" inputmode="decimal" id="${id}" data-sc-field="${f.name}"${f.value != null ? ` value="${f.value}"` : ''}${f.hint ? ` aria-describedby="${id}-hint"` : ''}>
+      ${f.hint ? `<p class="hint" id="${id}-hint">${f.hint}</p>` : ''}
     </div>`;
 }
 
 function renderScenarios() {
   $('scenarioList').innerHTML = SCENARIO_UI.map(sc => `
     <div class="scenario" data-scenario="${sc.key}">
-      <label class="check-item"><input type="checkbox" class="sc-enabled"><span>${sc.label}<span class="ref">${sc.ref}</span></span></label>
-      <div class="scenario-body">
-        <div class="hint">${sc.hint}</div>
+      <label class="check-item"><input type="checkbox" class="sc-enabled" aria-controls="sc-${sc.key}-body"><span>${sc.label}<span class="ref">${sc.ref}</span></span></label>
+      <div class="scenario-body" id="sc-${sc.key}-body">
+        <p class="hint">${sc.hint}</p>
         <div class="field-grid">
-          ${sc.fields.map(scenarioField).join('')}
+          ${sc.fields.map(f => scenarioField(sc, f)).join('')}
           ${sc.outbreathing ? `
             <div class="field">
-              <label>Pressure Load Relieved By</label>
-              <select data-sc-field="relieved_by">
+              <label for="sc-${sc.key}-relieved_by">Pressure load relieved by</label>
+              <select id="sc-${sc.key}-relieved_by" data-sc-field="relieved_by" aria-describedby="sc-${sc.key}-relieved_by-hint">
                 <option value="NORMAL">Normal venting devices</option>
                 <option value="EMERGENCY">Emergency devices (incl. EPRV)</option>
               </select>
-              <div class="hint">§3.6.1</div>
+              <p class="hint" id="sc-${sc.key}-relieved_by-hint">§3.6.1</p>
             </div>` : ''}
           ${sc.noLoad ? '' : `
             <label class="check-item"><input type="checkbox" data-sc-field="coincident"${sc.coincident ? ' checked' : ''}>
@@ -568,9 +580,12 @@ $('envFactor').addEventListener('change', (e) => show($('customEnvFactorField'),
 $('fireBasis').addEventListener('change', (e) => {
   $('fireBasisHint').textContent = e.target.value === 'HEXANE'
     ? 'Hexane properties (L = 334,900 J/kg, M = 86.17). Only for fluids similar to hexane.'
-    : 'Uses the latent heat, molecular weight and relieving vapor temperature entered under Fluid & Process Conditions.';
+    : 'Uses the latent heat, molecular weight and relieving vapor temperature from step 3.';
 });
-disclaimerCheck.addEventListener('change', () => { calcBtn.disabled = !disclaimerCheck.checked; });
+disclaimerCheck.addEventListener('change', () => {
+  calcBtn.disabled = !disclaimerCheck.checked;
+  $('runHint').hidden = disclaimerCheck.checked;
+});
 
 updateUnitLabels();
 updateMethodFields();
@@ -657,67 +672,121 @@ function fmtVal(v, unit) {
   return `${Number(v).toLocaleString('en-US', { maximumFractionDigits: 4 })} ${unit || ''}`.trim();
 }
 
+const svg = (size, body) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">${body}</svg>`;
 const ICONS = {
-  error: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-  warning: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-  notice: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l6.5 12H1.5L8 1.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.5v.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
-  pass: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  statusPass: '<svg class="status-pass" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6 9.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  statusFail: '<svg class="status-fail" width="18" height="18" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 6.5l5 5M11.5 6.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  error:   svg(16, '<circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'),
+  warning: svg(16, '<circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.5v4M8 10.5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'),
+  notice:  svg(16, '<path d="M8 1.5l6.5 12H1.5L8 1.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 6.5v3M8 11.5v.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'),
+  pass:    svg(18, '<circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5 8.5l2 2 4-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'),
+  fail:    svg(18, '<circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'),
 };
 
+// The kind is spelled out (visually hidden) so it is not conveyed by colour alone.
+const alertBox = (cls, icon, kind, message) =>
+  `<div class="alert ${cls}">${icon}<span><span class="visually-hidden">${kind}: </span>${escapeHtml(message)}</span></div>`;
+
 function renderAlerts(warnings, errors) {
-  const alert = (cls, icon, message) => `<div class="alert ${cls}">${icon}<span>${escapeHtml(message)}</span></div>`;
-  return (errors || []).map(e => alert('alert-error', ICONS.error, e)).join('') +
+  return (errors || []).map(e => alertBox('alert-error', ICONS.error, 'Error', e)).join('') +
     (warnings || []).map(w => (w.severity === 'WARNING'
-      ? alert('alert-error', ICONS.warning, w.message)
-      : alert('alert-warn', ICONS.notice, w.message))).join('');
+      ? alertBox('alert-error', ICONS.warning, 'Warning', w.message)
+      : alertBox('alert-warn', ICONS.notice, 'Note', w.message))).join('');
+}
+
+// Errors and warnings stay visible; notes are grouped in a collapsible list.
+function renderNotices(warnings, errors) {
+  const notes = (warnings || []).filter(w => w.severity !== 'WARNING');
+  const urgent = (warnings || []).filter(w => w.severity === 'WARNING');
+  let html = renderAlerts(urgent, errors);
+  if (notes.length > 0) {
+    html += `
+      <details class="alerts-group" open>
+        <summary>Notes and assumptions (${notes.length})</summary>
+        ${renderAlerts(notes, [])}
+      </details>`;
+  }
+  return html;
 }
 
 function tableRow(label, value, highlight) {
-  return `<tr${highlight ? ' class="highlight"' : ''}><th>${escapeHtml(String(label))}</th><td>${escapeHtml(String(value))}</td></tr>`;
+  return `<tr${highlight ? ' class="highlight"' : ''}><th scope="row">${escapeHtml(String(label))}</th><td>${escapeHtml(String(value))}</td></tr>`;
 }
 
 function section(title, rows, extraClass = '', after = '') {
   return `
     <div class="result-section ${extraClass}">
       <h3>${escapeHtml(title)}</h3>
-      <table class="result-table">${rows}</table>
+      <div class="table-wrap"><table class="result-table">${rows}</table></div>
       ${after}
     </div>`;
 }
 
 // --- Render full results ----------------------------------------------------
 
-function renderCompliance(o) {
-  const av = o.actual_venting;
+function renderSummaryTiles(o) {
   const fu = o.flow_unit;
+  const d = o.design;
+  const tile = (label, value, basis, accent) => `
+    <div class="stat${accent ? ' accent' : ''}">
+      <div class="stat-label">${escapeHtml(label)}</div>
+      <div class="stat-value">${escapeHtml(fmtVal(value))} <span class="unit">${escapeHtml(fu)}</span></div>
+      <div class="stat-basis">${escapeHtml(basis)}</div>
+    </div>`;
+  return `
+    <h3 class="visually-hidden">Governing requirements</h3>
+    <div class="stat-grid">
+      ${tile('Governing outbreathing', o.governing.outbreathing, o.governing.outbreathing_basis, true)}
+      ${tile('Governing inbreathing', o.governing.inbreathing, o.governing.inbreathing_basis, true)}
+      ${tile('Normal venting devices', d.normal_out, d.normal_out_basis)}
+      ${d.emergency_out != null ? tile('Emergency venting (all devices)', d.emergency_out, d.emergency_out_basis) : ''}
+    </div>`;
+}
+
+function complianceRows(o) {
+  const av = o.actual_venting;
   const rows = [
-    { label: 'Normal Outbreathing', required: o.design.normal_out, actual: av.normal_out, pass: av.adequacy.normal_out },
+    { label: 'Normal outbreathing', required: o.design.normal_out, actual: av.normal_out, pass: av.adequacy.normal_out },
   ];
   if (av.adequacy.emergency_out != null) {
-    rows.push({ label: 'Emergency Outbreathing', required: o.design.emergency_out, actual: av.emergency_out, pass: av.adequacy.emergency_out });
+    rows.push({ label: 'Emergency outbreathing', required: o.design.emergency_out, actual: av.emergency_out, pass: av.adequacy.emergency_out });
   }
-  rows.push({ label: 'Inbreathing (Vacuum)', required: o.design.inbreathing, actual: av.inbreathing, pass: av.adequacy.inbreathing });
-  const allPass = rows.every(r => r.pass);
+  rows.push({ label: 'Inbreathing (vacuum)', required: o.design.inbreathing, actual: av.inbreathing, pass: av.adequacy.inbreathing });
+  return rows;
+}
 
+function renderCompliance(o) {
+  const fu = o.flow_unit;
+  const rows = complianceRows(o);
+  const allPass = rows.every(r => r.pass);
   return `
     <div class="compliance-summary">
-      <div class="compliance-header ${allPass ? 'all-pass' : 'has-fail'}">
-        ${allPass ? ICONS.pass : ICONS.warning}
-        ${allPass ? 'All Venting Requirements Met' : 'Venting Deficiency Detected — Review Required'}
-      </div>
-      <div class="compliance-row-header">
-        <span>Requirement</span><span>Required</span><span>Actual</span><span></span>
-      </div>
-      <div class="compliance-rows">
-        ${rows.map(r => `
-          <div class="compliance-row">
-            <span class="cr-label">${escapeHtml(r.label)}</span>
-            <span class="cr-value required">${escapeHtml(fmtVal(r.required, fu))}</span>
-            <span class="cr-value ${r.pass ? 'actual-pass' : 'actual-fail'}">${escapeHtml(fmtVal(r.actual, fu))}</span>
-            <span class="cr-status">${r.pass ? ICONS.statusPass : ICONS.statusFail}</span>
-          </div>`).join('')}
+      <h3 class="compliance-header ${allPass ? 'all-pass' : 'has-fail'}">
+        ${allPass ? ICONS.pass : ICONS.fail}
+        ${allPass ? 'All venting requirements met' : 'Venting deficiency — review required'}
+      </h3>
+      <div class="table-wrap">
+        <table class="compliance-table">
+          <thead>
+            <tr>
+              <th scope="col">Requirement</th>
+              <th scope="col">Required <span class="unit">${escapeHtml(fu)}</span></th>
+              <th scope="col">Installed <span class="unit">${escapeHtml(fu)}</span></th>
+              <th scope="col" class="col-status">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => {
+              const chip = (cls) => `<span class="status-chip ${cls} ${r.pass ? 'pass' : 'fail'}">${r.pass ? 'Pass' : 'Fail'}</span>`;
+              return `
+              <tr>
+                <th scope="row">${escapeHtml(r.label)}</th>
+                <td>${escapeHtml(fmtVal(r.required))}</td>
+                <td class="${r.pass ? 'actual-pass' : 'actual-fail'}">${escapeHtml(fmtVal(r.actual))}${chip('status-inline')}</td>
+                <td class="col-status">${chip('')}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
       </div>
     </div>`;
 }
@@ -725,31 +794,33 @@ function renderCompliance(o) {
 function renderScenarioResults(o) {
   const fu = o.flow_unit;
   const cell = (load, total, coincident) => (load > 0
-    ? `${fmtVal(total, fu)}${coincident ? '<br><small>incl. normal</small>' : ''}`
+    ? `${escapeHtml(fmtVal(total, fu))}${coincident ? '<br><small>incl. normal</small>' : ''}`
     : '—');
   return `
     <div class="device-breakdown">
-      <h3>Other Circumstances (§3.2.5) — Engineering Estimates</h3>
-      <table class="device-breakdown-table">
-        <thead>
-          <tr><th>Scenario</th><th>Pressure Load</th><th>Vacuum Load</th><th>Relief Path</th></tr>
-        </thead>
-        <tbody>
-          ${o.scenarios.map(sc => `<tr>
-            <td>${escapeHtml(sc.label)} <span class="ref">${escapeHtml(sc.ref)}</span></td>
-            <td class="mono-val">${cell(sc.out, sc.total_out, sc.coincident)}</td>
-            <td class="mono-val">${cell(sc.in, sc.total_in, sc.coincident)}</td>
-            <td>${sc.out > 0 ? (sc.relieved_by === 'EMERGENCY' ? 'Emergency' : 'Normal') : (sc.in > 0 ? 'Vacuum' : 'No load')}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
+      <h3>Other circumstances (§3.2.5) — engineering estimates</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th scope="col">Scenario</th><th scope="col">Pressure load</th><th scope="col">Vacuum load</th><th scope="col">Relief path</th></tr>
+          </thead>
+          <tbody>
+            ${o.scenarios.map(sc => `<tr>
+              <td>${escapeHtml(sc.label)} <span class="ref">${escapeHtml(sc.ref)}</span></td>
+              <td class="mono-val">${cell(sc.out, sc.total_out, sc.coincident)}</td>
+              <td class="mono-val">${cell(sc.in, sc.total_in, sc.coincident)}</td>
+              <td>${sc.out > 0 ? (sc.relieved_by === 'EMERGENCY' ? 'Emergency' : 'Normal') : (sc.in > 0 ? 'Vacuum' : 'No load')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
     </div>`;
 }
 
 function renderDevices(o) {
   const devs = o.actual_venting.devices;
   const fu = o.flow_unit;
-  const typeLabels = { PVRV: 'PVRV', EPRV: 'EPRV', FREE_VENT: 'Free Vent' };
+  const typeLabels = { PVRV: 'PVRV', EPRV: 'EPRV', FREE_VENT: 'Free vent' };
   const typeCls    = { PVRV: 'pvrv', EPRV: 'eprv', FREE_VENT: 'free-vent' };
   let html = '';
 
@@ -758,27 +829,29 @@ function renderDevices(o) {
     const paths = [['out', 'Pressure'], ['in', 'Vacuum']];
     html += `
       <div class="result-section">
-        <h3>Flame Arrestor — Pressure Drop &amp; Budget at Effective Flow (ISO 16852)</h3>
-        <table class="arrestor-results-table">
-          <thead>
-            <tr><th>Device</th><th>ΔP</th><th>Velocity</th><th>Budget Used</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            ${devs.map((d, i) => paths.map(([dir, pathLabel]) => {
-              const a = d.arrestor && d.arrestor[dir];
-              if (!a) return '';
-              return `<tr>
-                <td>#${i + 1} — ${escapeHtml(typeLabels[d.type] || d.type)}<br><small>${pathLabel}</small></td>
-                <td>${fmtVal(a.deltaP_mbar, 'mbar')}<br><small>${fmtVal(a.deltaP_inH2O, 'inH₂O')}</small></td>
-                <td>${fmtVal(a.velocity_m_s, 'm/s')}</td>
-                <td>${fmtVal(a.budget_pct, '%')}</td>
-                <td><span class="fa-badge ${badgeCls[a.badge] || ''}">${escapeHtml(a.badge)}</span></td>
-              </tr>`;
-            }).join('')).join('')}
-          </tbody>
-        </table>
-        <div style="font-size:0.75rem; color:var(--gray-600); margin-top:6px;">Budget used: arrestor ΔP at the effective flow as a share of the allowable pressure/vacuum
-          (open vents) or of the margin between set point and allowable (valves). WARN ≥ 50 %, FAIL ≥ 90 %.</div>
+        <h3>Flame arrestor — pressure drop at effective flow (ISO 16852)</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th scope="col">Device</th><th scope="col">ΔP</th><th scope="col">Velocity</th><th scope="col">Budget used</th><th scope="col">Status</th></tr>
+            </thead>
+            <tbody>
+              ${devs.map((d, i) => paths.map(([dir, pathLabel]) => {
+                const a = d.arrestor && d.arrestor[dir];
+                if (!a) return '';
+                return `<tr>
+                  <td>#${i + 1} — ${escapeHtml(typeLabels[d.type] || d.type)}<br><small>${pathLabel}</small></td>
+                  <td class="mono-val">${fmtVal(a.deltaP_mbar, 'mbar')}<br><small>${fmtVal(a.deltaP_inH2O, 'inH₂O')}</small></td>
+                  <td class="mono-val">${fmtVal(a.velocity_m_s, 'm/s')}</td>
+                  <td class="mono-val">${fmtVal(a.budget_pct, '%')}</td>
+                  <td><span class="fa-badge ${badgeCls[a.badge] || ''}">${escapeHtml(a.badge)}</span></td>
+                </tr>`;
+              }).join('')).join('')}
+            </tbody>
+          </table>
+        </div>
+        <p class="table-note">Budget used: arrestor ΔP at the effective flow as a share of the allowable pressure/vacuum
+          (open vents) or of the margin between set point and allowable (valves). WARN ≥ 50 %, FAIL ≥ 90 %.</p>
       </div>`;
   }
 
@@ -792,133 +865,196 @@ function renderDevices(o) {
 
   html += `
     <div class="device-breakdown">
-      <h3>Installed Device Contributions at MAWP / MAWV</h3>
-      <table class="device-breakdown-table">
-        <thead>
-          <tr><th>#</th><th>Type</th><th>Direction</th><th>Outbreathing</th><th>Inbreathing</th></tr>
-        </thead>
-        <tbody>
-          ${devs.map((d, i) => {
-            const dirLabel = d.direction === 'BOTH' ? 'Both' : d.direction === 'OUTBREATHING' ? 'Pressure' : 'Vacuum';
-            return `<tr>
-              <td>${i + 1}</td>
-              <td><span class="type-badge ${typeCls[d.type] || ''}">${escapeHtml(typeLabels[d.type] || d.type)}</span></td>
-              <td>${escapeHtml(dirLabel)}</td>
-              <td class="mono-val">${capacityCell(d, 'out', d.flow_out)}</td>
-              <td class="mono-val">${capacityCell(d, 'in', d.flow_in)}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-        <tfoot>
-          <tr style="font-weight:700; border-top: 2px solid var(--gray-200);">
-            <td colspan="3" style="text-align:right; color:var(--gray-600);">Total Installed Capacity</td>
-            <td class="mono-val">${fmtVal(o.actual_venting.emergency_out, fu)}</td>
-            <td class="mono-val">${fmtVal(o.actual_venting.inbreathing, fu)}</td>
-          </tr>
-        </tfoot>
-      </table>
+      <h3>Installed device contributions at MAWP / MAWV</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th scope="col">#</th><th scope="col">Type</th><th scope="col">Direction</th><th scope="col">Outbreathing</th><th scope="col">Inbreathing</th></tr>
+          </thead>
+          <tbody>
+            ${devs.map((d, i) => {
+              const dirLabel = d.direction === 'BOTH' ? 'Both' : d.direction === 'OUTBREATHING' ? 'Pressure' : 'Vacuum';
+              return `<tr>
+                <td>${i + 1}</td>
+                <td><span class="type-badge ${typeCls[d.type] || ''}">${escapeHtml(typeLabels[d.type] || d.type)}</span></td>
+                <td>${escapeHtml(dirLabel)}</td>
+                <td class="mono-val">${capacityCell(d, 'out', d.flow_out)}</td>
+                <td class="mono-val">${capacityCell(d, 'in', d.flow_in)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3" class="total-label">Total installed capacity</td>
+              <td class="mono-val">${fmtVal(o.actual_venting.emergency_out, fu)}</td>
+              <td class="mono-val">${fmtVal(o.actual_venting.inbreathing, fu)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>`;
   return html;
 }
 
 function renderResults(result) {
   if (!result.outputs) {
-    resultsContainer.innerHTML = renderAlerts(result.warnings, result.errors);
-    return;
+    resultsContainer.innerHTML = `
+      <h3 class="results-heading" id="resultsHeading" tabindex="-1">Please check your inputs</h3>
+      ${renderAlerts(result.warnings, result.errors)}`;
+    $('btnPrint').hidden = true;
+    return { status: `Calculation not run. ${(result.errors || []).length} input issue(s) listed in the results.` };
   }
 
   const o  = result.outputs;
   const fu = o.flow_unit;
   const nv = o.normal_venting;
-  let html = renderAlerts(result.warnings, result.errors);
+  const p  = o.project;
 
-  const p = o.project;
-  const projectRows = [
-    ['Tag Number', p.tag_number], ['Project', p.project_name], ['Prepared By', p.prepared_by], ['Fluid', p.fluid_name],
-  ].filter(([, v]) => v).map(([k, v]) => tableRow(k, v)).join('');
-  html += section('Calculation Basis', projectRows + tableRow('Normal Venting Method', o.method_label));
+  let html = `
+    <div class="print-only">
+      <p><strong>API 2000 Venting Calculator</strong> — ${escapeHtml(new Date().toLocaleString())}</p>
+    </div>
+    <h3 class="results-heading" id="resultsHeading" tabindex="-1">${p.tag_number ? `Results for ${escapeHtml(p.tag_number)}` : 'Calculation results'}</h3>`;
 
   if (o.actual_venting) html += renderCompliance(o);
+  html += renderSummaryTiles(o);
+  html += renderNotices(result.warnings, result.errors);
 
-  const d = o.design;
-  let governingRows =
-    tableRow('Governing Outbreathing (pressure)', `${fmtVal(o.governing.outbreathing, fu)} — ${o.governing.outbreathing_basis}`) +
-    tableRow('Governing Inbreathing (vacuum)',    `${fmtVal(o.governing.inbreathing, fu)} — ${o.governing.inbreathing_basis}`) +
-    tableRow('Normal Venting Devices',            `${fmtVal(d.normal_out, fu)} — ${d.normal_out_basis}`);
-  if (d.emergency_out != null) {
-    governingRows += tableRow('Emergency Venting (all devices)', `${fmtVal(d.emergency_out, fu)} — ${d.emergency_out_basis}`);
-  }
-  html += section('Governing Requirements', governingRows, 'governing-box');
+  const projectRows = [
+    ['Tag number', p.tag_number], ['Project', p.project_name], ['Prepared by', p.prepared_by], ['Fluid', p.fluid_name],
+  ].filter(([, v]) => v).map(([k, v]) => tableRow(k, v)).join('');
+  html += section('Calculation basis', projectRows + tableRow('Normal venting method', o.method_label));
 
   let thermalRows =
-    tableRow('Thermal Inbreathing',  fmtVal(nv.thermal_in, fu)) +
-    tableRow('Thermal Outbreathing', fmtVal(nv.thermal_out, fu));
+    tableRow('Thermal inbreathing',  fmtVal(nv.thermal_in, fu)) +
+    tableRow('Thermal outbreathing', fmtVal(nv.thermal_out, fu));
   if (o.method === 'GENERAL') {
     thermalRows +=
       tableRow('Y-factor (Table 1)', fmtVal(nv.Y)) +
       tableRow('C-factor (Table 2)', fmtVal(nv.C)) +
-      tableRow('Insulation Reduction Factor Rᵢ', fmtVal(nv.Ri));
+      tableRow('Insulation reduction factor Rᵢ', fmtVal(nv.Ri));
   }
-  html += section('Normal Venting — Thermal', thermalRows);
-  html += section('Normal Venting — Liquid Movement',
+  html += section('Normal venting — thermal', thermalRows);
+  html += section('Normal venting — liquid movement',
     tableRow('Inbreathing (emptying)', fmtVal(nv.liquid_in, fu)) +
     tableRow('Outbreathing (filling)', fmtVal(nv.liquid_out, fu)) +
     tableRow('Volatile?', nv.is_volatile ? 'Yes' : 'No'));
-  html += section('Normal Venting — Totals',
-    tableRow('Total Normal Inbreathing',  fmtVal(nv.total_in, fu), true) +
-    tableRow('Total Normal Outbreathing', fmtVal(nv.total_out, fu), true));
+  html += section('Normal venting — totals',
+    tableRow('Total normal inbreathing',  fmtVal(nv.total_in, fu), true) +
+    tableRow('Total normal outbreathing', fmtVal(nv.total_out, fu), true));
 
   const ev = o.emergency_venting;
   if (ev) {
     const t9 = ev.table9_extrapolated;
-    html += section('Emergency Venting — Fire Exposure',
-      tableRow('Wetted Area', fmtVal(ev.wetted_area, o.area_unit)) +
-      tableRow('Wetted Area Basis', ev.wetted_area_method) +
-      tableRow('Heat Input Q (Table 3)', fmtVal(ev.heat_input, o.heat_unit)) +
-      tableRow('Environmental Factor F (Table 9)', t9 ? `${t9.F} (extrapolated with note b)` : fmtVal(ev.F)) +
-      tableRow('Fire Venting Basis', ev.basis === 'HEXANE' ? 'Hexane-like fluid (Tables 5 & 7, Eq. 16)' : 'Stored fluid (Eq. 14)') +
-      tableRow('Vapor Generation', fmtVal(ev.vapour_mass_flow, o.mass_unit)) +
-      tableRow('Required Emergency Venting', fmtVal(ev.required, fu), true) +
+    html += section('Emergency venting — fire exposure',
+      tableRow('Wetted area', fmtVal(ev.wetted_area, o.area_unit)) +
+      tableRow('Wetted area basis', ev.wetted_area_method) +
+      tableRow('Heat input Q (Table 3)', fmtVal(ev.heat_input, o.heat_unit)) +
+      tableRow('Environmental factor F (Table 9)', t9 ? `${t9.F} (extrapolated with note b)` : fmtVal(ev.F)) +
+      tableRow('Fire venting basis', ev.basis === 'HEXANE' ? 'Hexane-like fluid (Tables 5 & 7, Eq. 16)' : 'Stored fluid (Eq. 14)') +
+      tableRow('Vapor generation', fmtVal(ev.vapour_mass_flow, o.mass_unit)) +
+      tableRow('Required emergency venting', fmtVal(ev.required, fu), true) +
       (t9
-        ? tableRow('Table 9 Minimum F (lowest tabulated row)', fmtVal(t9.F_min)) +
-          tableRow('Emergency Venting at Table 9 Minimum F', fmtVal(t9.required_at_F_min, fu))
+        ? tableRow('Table 9 minimum F (lowest tabulated row)', fmtVal(t9.F_min)) +
+          tableRow('Emergency venting at Table 9 minimum F', fmtVal(t9.required_at_F_min, fu))
         : ''),
       '',
       t9 ? renderAlerts([{ severity: 'WARNING', message: t9.message }], []) : '');
   }
 
   if (o.scenarios.length > 0) html += renderScenarioResults(o);
-
   if (o.actual_venting && o.actual_venting.devices.length > 0) html += renderDevices(o);
 
   if (result.intermediates) {
     html += `
-      <div class="result-section">
-        <div class="collapsible-toggle" data-collapsible>
-          <h3 style="margin:0;">Intermediates (SI Audit Trail)</h3>
-          <span class="arrow">&#9654;</span>
-        </div>
-        <div class="collapsible-body">
+      <details class="audit">
+        <summary>Intermediates (SI audit trail)</summary>
+        <div class="table-wrap">
           <table class="result-table">
             ${result.intermediates.map(([label, value, unit]) => tableRow(label, fmtVal(value, unit))).join('')}
           </table>
         </div>
-      </div>`;
+      </details>`;
   }
 
   resultsContainer.innerHTML = html;
+  $('btnPrint').hidden = false;
 
-  resultsContainer.querySelectorAll('[data-collapsible]').forEach(toggle => {
-    toggle.addEventListener('click', () => {
-      toggle.classList.toggle('open');
-      toggle.nextElementSibling.classList.toggle('open');
-    });
-  });
+  const verdict = o.actual_venting
+    ? (complianceRows(o).every(r => r.pass) ? 'All venting requirements met.' : 'Venting deficiency found.')
+    : '';
+  return {
+    status: `Calculation complete. ${verdict} Governing outbreathing ${fmtVal(o.governing.outbreathing, fu)}, ` +
+      `inbreathing ${fmtVal(o.governing.inbreathing, fu)}.`,
+  };
 }
 
-// --- Form submission --------------------------------------------------------
+function announce(message) {
+  const status = $('resultsStatus');
+  status.textContent = '';
+  // A fresh text node after a tick makes screen readers announce repeated messages.
+  setTimeout(() => { status.textContent = message; }, 50);
+}
+
+// --- Worked example ---------------------------------------------------------
+// Fills the form only; the user still ticks the acknowledgement and runs it.
+
+function setField(el, value) {
+  if (el.type === 'checkbox' || el.type === 'radio') el.checked = value;
+  else el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function loadExample() {
+  const values = {
+    unitSystem: 'SI', ventMethod: 'GENERAL', tagNumber: 'EX-101', projectName: 'Worked example', preparedBy: '',
+    tankShape: 'VERTICAL_CYLINDER', tankVolume: 785, tankDiameter: 10, tankHeight: 10, tankMAWP: 3.5, tankMAWV: 0.5,
+    tankElevation: 0, fluidName: 'Light hydrocarbon (example)', vaporPressureClass: 'HIGHER', operatingTemp: '',
+    maxFillRate: 200, maxEmptyRate: 150, latentHeat: 357000, molWeight: 72.15, relievingTemp: 37.5,
+    latitudeZone: 'BELOW_42N', insulationType: 'UNINSULATED', fireBasis: 'FLUID', envFactor: 'BARE', manualWettedArea: '',
+  };
+  for (const [id, v] of Object.entries(values)) setField($(id), v);
+  setField($('opt_fireCaseEnabled'), true);
+  document.querySelectorAll('#scenarioList .sc-enabled:checked').forEach(cb => setField(cb, false));
+
+  // A gooseneck behind a flame arrestor, plus an emergency relief valve for the fire case.
+  deviceRoster.innerHTML = '';
+  renderDeviceRow();
+  renderDeviceRow();
+  const [vent, eprv] = deviceRoster.querySelectorAll('.device-card');
+  setField(vent.querySelector('.dev-type'), 'FREE_VENT');
+  setField(vent.querySelector('.dev-cap-src[value="calculated"]'), true);
+  setField(vent.querySelector('.dev-pipe-diam'), 202.7);
+  setField(vent.querySelector('.dev-cd'), 0.5);
+  setField(vent.querySelector('.fa-enabled'), true);
+  setField(vent.querySelector('.fa-k'), 3.5);
+  setField(vent.querySelector('.fa-diameter'), 203.2);
+  setField(eprv.querySelector('.dev-type'), 'EPRV');
+  setField(eprv.querySelector('.dev-direction'), 'OUTBREATHING');
+  setField(eprv.querySelector('.dev-sp'), 2.5);
+  setField(eprv.querySelector('.dev-flow-out'), 25000);
+  setField(eprv.querySelector('.dev-overpressure'), 10);
+
+  selectTab(tabButtons[0], false);
+  announce('Example tank loaded. Tick the acknowledgement and run the calculation.');
+  disclaimerCheck.focus();
+}
+
+// --- Form submission and actions --------------------------------------------
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  renderResults(window.API2000.runCalculation(assemblePayload()));
+  const { status } = renderResults(window.API2000.runCalculation(assemblePayload()));
+  announce(status);
+  $('resultsHeading').focus();
+});
+
+resultsContainer.addEventListener('click', (e) => {
+  if (e.target.closest('#btnExample')) loadExample();
+});
+$('btnPrint').addEventListener('click', () => window.print());
+// Printed reports include the full audit trail.
+window.addEventListener('beforeprint', () => {
+  resultsContainer.querySelectorAll('details').forEach(d => { d.open = true; });
 });
