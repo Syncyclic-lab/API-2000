@@ -18,7 +18,7 @@ const payload = (edit = () => {}) => {
     fluid: { flash_point: 20, vapor_pressure_class: 'HEXANE', operating_temp: 20, max_fill_rate: 100, max_empty_rate: 100 },
     environment: { latitude_zone: 'BETWEEN_42N_AND_58N', insulation_type: 'UNINSULATED' },
     scenarios: {},
-    fire: { include: true, environmental_factor: 'BARE' },
+    fire: { include: true, basis: 'HEXANE', environmental_factor: 'BARE' },
     devices: [],
   };
   edit(p);
@@ -85,14 +85,43 @@ describe('runCalculation', () => {
     expect(Math.abs(us.normal_venting.thermal_in / (1000 / C.BBL_TO_M3) - 1)).toBeLessThan(0.01);
   });
 
-  it('applies Eq. 14 when the fluid properties are given', () => {
+  it('applies Eq. 14 to the stored fluid when that basis is selected', () => {
     const r = runCalculation(payload(p => {
       Object.assign(p.fluid, { latent_heat: 334_900, molecular_weight: 86.17, relieving_temp: 0 });
-      p.fire.environmental_factor = 'IMPOUNDMENT';
+      Object.assign(p.fire, { basis: 'FLUID', environmental_factor: 'IMPOUNDMENT' });
     }));
     expect(r.outputs.emergency_venting.basis).toBe('FLUID');
     expect(r.outputs.emergency_venting.F).toBe(0.5);
     expect(Math.abs(r.outputs.emergency_venting.required - 0.5 * 19_910) / 9_955).toBeLessThan(0.001);
+
+    // Water at 100 °C: Eq. 14 differs strongly from the hexane basis.
+    const water = runCalculation(payload(p => {
+      Object.assign(p.fluid, { latent_heat: 2_257_000, molecular_weight: 18.02, relieving_temp: 100 });
+      p.fire.basis = 'FLUID';
+    }));
+    const expected = 906.6 * (4_129_700 / 2_257_000) * Math.sqrt(373.15 / 18.02);
+    expect(Math.abs(water.outputs.emergency_venting.required / expected - 1)).toBeLessThan(0.001);
+  });
+
+  it('requires latent heat, molecular weight and relieving temperature for Eq. 14', () => {
+    const r = runCalculation(payload(p => {
+      p.fire.basis = 'FLUID';
+      p.fluid.latent_heat = 300_000;
+    }));
+    expect(r.outputs).toBeUndefined();
+    expect(r.errors[0]).toMatch(/molecular weight, relieving vapor temperature/);
+  });
+
+  it('warns when the hexane basis is used for a fluid that is not hexane-like', () => {
+    const r = runCalculation(payload(p => {
+      Object.assign(p.fluid, { latent_heat: 2_257_000, molecular_weight: 18.02, relieving_temp: 100 });
+    }));
+    expect(r.outputs.emergency_venting.basis).toBe('HEXANE');
+    expect(hasWarning(r, 'not hexane-like')).toBe(true);
+    const hexaneLike = runCalculation(payload(p => {
+      Object.assign(p.fluid, { latent_heat: 334_900, molecular_weight: 86.17, relieving_temp: 0 });
+    }));
+    expect(hasWarning(hexaneLike, 'not hexane-like')).toBe(false);
   });
 
   it('reports validation errors instead of NaN results', () => {
