@@ -565,6 +565,11 @@ vaporPressure.addEventListener('change', updateVolatilityIndicator);
 flashPointInput.addEventListener('input', updateVolatilityIndicator);
 insulationType.addEventListener('change', updateInsulationFields);
 $('envFactor').addEventListener('change', (e) => show($('customEnvFactorField'), e.target.value === 'CUSTOM'));
+$('fireBasis').addEventListener('change', (e) => {
+  $('fireBasisHint').textContent = e.target.value === 'HEXANE'
+    ? 'Hexane properties (L = 334,900 J/kg, M = 86.17). Only for fluids similar to hexane.'
+    : 'Uses the latent heat, molecular weight and relieving vapor temperature entered under Fluid & Process Conditions.';
+});
 disclaimerCheck.addEventListener('change', () => { calcBtn.disabled = !disclaimerCheck.checked; });
 
 updateUnitLabels();
@@ -630,6 +635,7 @@ function assemblePayload() {
     scenarios: collectScenarios(),
     fire: {
       include:              bool('opt_fireCaseEnabled'),
+      basis:                $('fireBasis').value,
       environmental_factor: $('envFactor').value,
       custom_factor:        num('customEnvFactor'),
       manual_wetted_area:   num('manualWettedArea'),
@@ -858,7 +864,7 @@ function renderResults(result) {
       tableRow('Wetted Area Basis', ev.wetted_area_method) +
       tableRow('Heat Input Q (Table 3)', fmtVal(ev.heat_input, o.heat_unit)) +
       tableRow('Environmental Factor F (Table 9)', fmtVal(ev.F)) +
-      tableRow('Fluid Basis', ev.basis === 'HEXANE' ? 'Hexane (Tables 5 & 7)' : 'Stored fluid (Eq. 14)') +
+      tableRow('Fire Venting Basis', ev.basis === 'HEXANE' ? 'Hexane-like fluid (Tables 5 & 7, Eq. 16)' : 'Stored fluid (Eq. 14)') +
       tableRow('Vapor Generation', fmtVal(ev.vapour_mass_flow, o.mass_unit)) +
       tableRow('Required Emergency Venting', fmtVal(ev.required, fu), true));
   }

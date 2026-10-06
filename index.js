@@ -261,6 +261,7 @@
       },
       fire: {
         include:              fire.include !== false,
+        basis:                fire.basis === 'HEXANE' ? 'HEXANE' : 'FLUID',
         environmental_factor: fire.environmental_factor || 'BARE',
         custom_factor:        fire.custom_factor ?? null,
         manual_wetted_m2:     c(uc.toM2, fire.manual_wetted_area),
@@ -291,6 +292,15 @@
     }
 
     if (fire.include) {
+      if (fire.basis === 'FLUID') {
+        const missing = [
+          !(fluid.latent_J_kg > 0) && 'latent heat of vaporization',
+          !(fluid.molecular_weight > 0) && 'molecular weight',
+          fluid.relieving_temp_C == null && 'relieving vapor temperature',
+        ].filter(Boolean);
+        need(missing.length === 0, `Fire case by Eq. (14) needs the ${missing.join(', ')} (Fluid & Process Conditions). ` +
+          'Select the hexane basis only for hexane-like fluids.');
+      }
       if (fire.environmental_factor === 'INSULATED') {
         need(insulated && env.thickness_m > 0 && env.conductivity > 0,
           'The insulated environmental factor needs an insulated tank type with insulation thickness and thermal conductivity.');
@@ -340,16 +350,15 @@
       thickness_m: env.thickness_m, conductivity: env.conductivity, custom: fire.custom_factor,
     });
 
-    const userFluid = fluid.latent_J_kg > 0 && fluid.molecular_weight > 0;
-    const relieving_temp_C = fluid.relieving_temp_C ?? fluid.operating_temp_C ?? AMBIENT_C;
-    const basis = userFluid
-      ? { L: fluid.latent_J_kg, M: fluid.molecular_weight, T_K: relieving_temp_C + PHYSICAL.C_TO_K }
+    // Eq. (14) with the stored fluid's properties, or the hexane basis of Tables 5/7 (§3.3.3.3.3).
+    const basis = fire.basis === 'FLUID'
+      ? { L: fluid.latent_J_kg, M: fluid.molecular_weight, T_K: fluid.relieving_temp_C + PHYSICAL.C_TO_K }
       : FIRE.HEXANE;
     return {
       ...wetted,
       heat_input_W,
       F,
-      basis: userFluid ? 'FLUID' : 'HEXANE',
+      basis: fire.basis,
       L: basis.L,
       M: basis.M,
       T_K: basis.T_K,
@@ -473,11 +482,19 @@
         'with a weak roof-to-shell attachment (§3.3.3.2).');
     } else {
       if (fireCase.basis === 'HEXANE') {
-        notice('Latent heat and/or molecular weight not provided, so emergency venting uses the hexane basis of ' +
-          'Tables 5 and 7 (§3.3.3.3.3). Enter both to apply Eq. (14) to the stored fluid.');
-      } else if (fluid.relieving_temp_C == null) {
-        notice(`Relieving vapour temperature not entered; ${(fireCase.T_K - PHYSICAL.C_TO_K).toFixed(1)} °C ` +
-          'has been used in Eq. (14). Enter the bubble point at the relieving pressure.');
+        notice('The hexane basis (Tables 5 and 7, Eq. 16) applies only where the stored fluid is similar to hexane ' +
+          '(§3.3.3.3.3). Use Eq. (14) for other fluids.');
+        // Compare with Eq. (14) when the fluid's properties are known.
+        if (fluid.latent_J_kg > 0 && fluid.molecular_weight > 0) {
+          const T_K = (fluid.relieving_temp_C ?? AMBIENT_C) + PHYSICAL.C_TO_K;
+          const eq14 = engine.calcEmergencyVenting(fireCase.heat_input_W, fireCase.F, fluid.latent_J_kg, fluid.molecular_weight, T_K).emergency_out;
+          const diff = eq14 / fireCase.emergency_out - 1;
+          if (Math.abs(diff) > 0.1) {
+            warn(`The entered fluid properties give ${Math.round(eq14).toLocaleString('en-US')} Nm³/h by Eq. (14), ` +
+              `${Math.abs(diff * 100).toFixed(0)} % ${diff > 0 ? 'more' : 'less'} than the hexane basis. ` +
+              'This fluid is not hexane-like; select the Eq. (14) fire venting basis.');
+          }
+        }
       }
       if (fire.manual_wetted_m2 == null) {
         if (fireCase.wetted_area_m2 === 0) {
