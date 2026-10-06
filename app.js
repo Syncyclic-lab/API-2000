@@ -1037,8 +1037,33 @@ function loadExample() {
   setField(eprv.querySelector('.dev-overpressure'), 10);
 
   selectTab(tabButtons[0], false);
-  announce('Example tank loaded. Tick the acknowledgement and run the calculation.');
-  disclaimerCheck.focus();
+
+  // Already acknowledged: show the example's results straight away.
+  if (disclaimerCheck.checked) {
+    form.requestSubmit();
+    return;
+  }
+  resultsContainer.innerHTML = `
+    <div class="results-placeholder example-loaded">
+      ${ICONS.pass}
+      <h3 class="results-heading" id="resultsHeading" tabindex="-1">Example tank loaded</h3>
+      <p>A 785 m³ vertical tank (MAWP 3.5 kPa, MAWV 0.5 kPa) with a gooseneck vent behind a flame arrestor and an
+        emergency relief valve is now filled in. Review or edit the inputs, then tick the acknowledgement and run
+        the calculation.</p>
+      <button type="button" class="btn btn-primary" id="btnGoRun">Go to Run calculation</button>
+    </div>`;
+  announce('Example tank loaded into the form. Tick the acknowledgement and run the calculation.');
+  $('resultsHeading').focus();
+}
+
+// Brings the acknowledgement and Run button into view and briefly highlights them.
+function goToRun() {
+  const bar = document.querySelector('.run-bar');
+  bar.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  disclaimerCheck.focus({ preventScroll: true });
+  bar.classList.remove('attention');
+  void bar.offsetWidth;   // restart the highlight animation
+  bar.classList.add('attention');
 }
 
 // --- Form submission and actions --------------------------------------------
@@ -1052,6 +1077,7 @@ form.addEventListener('submit', (e) => {
 
 resultsContainer.addEventListener('click', (e) => {
   if (e.target.closest('#btnExample')) loadExample();
+  if (e.target.closest('#btnGoRun')) goToRun();
 });
 $('btnPrint').addEventListener('click', () => window.print());
 // Printed reports include the full audit trail.
