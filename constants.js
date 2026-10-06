@@ -120,6 +120,9 @@ window.API2000.FIRE = {
   // Table 9 note b — insulated F = conductance · 887.9 K / 66,200 W/m².
   INSULATION_DT_K:           887.9,
   INSULATION_HEAT_FLUX_W_M2: 66_200,
+  // Lowest tabulated insulated row of Table 9. Lower conductances extrapolate note b.
+  TABLE9_MIN_CONDUCTANCE_W_M2K: 1.9,
+  TABLE9_MIN_INSULATED_F:       0.025,
 };
 
 // --- OTHER CIRCUMSTANCES (§3.2.5) --------------------------------------------
@@ -199,7 +202,9 @@ window.API2000.FLAME_ARRESTOR = {
     INLINE_ECCENTRIC_DETONATION:   { label: 'Inline eccentric detonation',      k_low: 15, k_high: 40, k_default: 25  },
     PRE_VOLUME_DETONATION:         { label: 'Pre-volume / unstable detonation', k_low: 20, k_high: 50, k_default: 35  },
   },
-  // Warn if arrestor ΔP at rated flow consumes more than this fraction of MAWP
+  // Warn if arrestor ΔP at the effective (arrested) flow consumes more than this
+  // fraction of the pressure budget: the allowable pressure or vacuum, less the
+  // set point for valves.
   BUDGET_WARNING_FRACTION: 0.5,
   // Fail if ΔP exceeds this fraction (adequacy failure risk)
   BUDGET_FAILURE_FRACTION: 0.9,

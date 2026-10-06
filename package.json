@@ -4,7 +4,8 @@
   "description": "API Std 2000 (7th Ed.) tank venting calculator",
   "main": "index.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest && node test/acceptance.js",
+    "test:acceptance": "node test/acceptance.js"
   },
   "repository": {
     "type": "git",

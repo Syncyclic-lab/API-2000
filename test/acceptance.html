@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>API 2000 Acceptance Tests</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; color: #202124; background: #fff; }
+    #summary { font-size: 1.2rem; font-weight: 700; margin-bottom: 12px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #e8eaed; vertical-align: top; }
+    td:nth-child(4), td:nth-child(5) { font-family: ui-monospace, monospace; }
+    .pass { color: #137333; }
+    .fail { color: #c5221f; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>API 2000 calculator — acceptance tests</h1>
+  <div id="summary">Running…</div>
+  <table>
+    <thead><tr><th>Result</th><th>Group</th><th>Check</th><th>Actual</th><th>Expected</th></tr></thead>
+    <tbody id="results"></tbody>
+  </table>
+  <script src="../constants.js"></script>
+  <script src="../unitConverter.js"></script>
+  <script src="../api2000Engine.js"></script>
+  <script src="../flameArrestor.js"></script>
+  <script src="../index.js"></script>
+  <script src="acceptance.js"></script>
+</body>
+</html>

@@ -678,11 +678,12 @@ function tableRow(label, value, highlight) {
   return `<tr${highlight ? ' class="highlight"' : ''}><th>${escapeHtml(String(label))}</th><td>${escapeHtml(String(value))}</td></tr>`;
 }
 
-function section(title, rows, extraClass = '') {
+function section(title, rows, extraClass = '', after = '') {
   return `
     <div class="result-section ${extraClass}">
       <h3>${escapeHtml(title)}</h3>
       <table class="result-table">${rows}</table>
+      ${after}
     </div>`;
 }
 
@@ -754,30 +755,40 @@ function renderDevices(o) {
 
   if (devs.some(d => d.arrestor)) {
     const badgeCls = { PASS: 'pass', WARN: 'warn', FAIL: 'fail' };
+    const paths = [['out', 'Pressure'], ['in', 'Vacuum']];
     html += `
       <div class="result-section">
-        <h3>Flame Arrestor — Pressure Drop &amp; Budget (ISO 16852)</h3>
+        <h3>Flame Arrestor — Pressure Drop &amp; Budget at Effective Flow (ISO 16852)</h3>
         <table class="arrestor-results-table">
           <thead>
-            <tr><th>Device</th><th>ΔP (mbar)</th><th>ΔP (inH₂O)</th><th>% of MAWP at Rated</th><th>Eff. Flow</th><th>Status</th></tr>
+            <tr><th>Device</th><th>ΔP</th><th>Velocity</th><th>Budget Used</th><th>Status</th></tr>
           </thead>
           <tbody>
-            ${devs.map((d, i) => {
-              const a = d.arrestor;
+            ${devs.map((d, i) => paths.map(([dir, pathLabel]) => {
+              const a = d.arrestor && d.arrestor[dir];
               if (!a) return '';
               return `<tr>
-                <td>#${i + 1} — ${escapeHtml(typeLabels[d.type] || d.type)}</td>
-                <td>${fmtVal(a.deltaP_mbar, 'mbar')}</td>
-                <td>${fmtVal(a.deltaP_inH2O, 'inH₂O')}</td>
+                <td>#${i + 1} — ${escapeHtml(typeLabels[d.type] || d.type)}<br><small>${pathLabel}</small></td>
+                <td>${fmtVal(a.deltaP_mbar, 'mbar')}<br><small>${fmtVal(a.deltaP_inH2O, 'inH₂O')}</small></td>
+                <td>${fmtVal(a.velocity_m_s, 'm/s')}</td>
                 <td>${fmtVal(a.budget_pct, '%')}</td>
-                <td>${fmtVal(a.effective_flow, fu)}</td>
                 <td><span class="fa-badge ${badgeCls[a.badge] || ''}">${escapeHtml(a.badge)}</span></td>
               </tr>`;
-            }).join('')}
+            }).join('')).join('')}
           </tbody>
         </table>
+        <div style="font-size:0.75rem; color:var(--gray-600); margin-top:6px;">Budget used: arrestor ΔP at the effective flow as a share of the allowable pressure/vacuum
+          (open vents) or of the margin between set point and allowable (valves). WARN ≥ 50 %, FAIL ≥ 90 %.</div>
       </div>`;
   }
+
+  // Effective capacity; behind an arrestor, also the capacity without it.
+  const capacityCell = (d, dir, value) => {
+    if (!(value > 0)) return '—';
+    const a = d.arrestor && d.arrestor[dir];
+    return escapeHtml(fmtVal(value, fu)) +
+      (a ? `<br><small>${escapeHtml(fmtVal(a.unarrested_flow, fu))} without arrestor</small>` : '');
+  };
 
   html += `
     <div class="device-breakdown">
@@ -793,8 +804,8 @@ function renderDevices(o) {
               <td>${i + 1}</td>
               <td><span class="type-badge ${typeCls[d.type] || ''}">${escapeHtml(typeLabels[d.type] || d.type)}</span></td>
               <td>${escapeHtml(dirLabel)}</td>
-              <td class="mono-val">${d.flow_out > 0 ? fmtVal(d.flow_out, fu) : '—'}</td>
-              <td class="mono-val">${d.flow_in > 0 ? fmtVal(d.flow_in, fu) : '—'}</td>
+              <td class="mono-val">${capacityCell(d, 'out', d.flow_out)}</td>
+              <td class="mono-val">${capacityCell(d, 'in', d.flow_in)}</td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -859,14 +870,21 @@ function renderResults(result) {
 
   const ev = o.emergency_venting;
   if (ev) {
+    const t9 = ev.table9_extrapolated;
     html += section('Emergency Venting — Fire Exposure',
       tableRow('Wetted Area', fmtVal(ev.wetted_area, o.area_unit)) +
       tableRow('Wetted Area Basis', ev.wetted_area_method) +
       tableRow('Heat Input Q (Table 3)', fmtVal(ev.heat_input, o.heat_unit)) +
-      tableRow('Environmental Factor F (Table 9)', fmtVal(ev.F)) +
+      tableRow('Environmental Factor F (Table 9)', t9 ? `${t9.F} (extrapolated with note b)` : fmtVal(ev.F)) +
       tableRow('Fire Venting Basis', ev.basis === 'HEXANE' ? 'Hexane-like fluid (Tables 5 & 7, Eq. 16)' : 'Stored fluid (Eq. 14)') +
       tableRow('Vapor Generation', fmtVal(ev.vapour_mass_flow, o.mass_unit)) +
-      tableRow('Required Emergency Venting', fmtVal(ev.required, fu), true));
+      tableRow('Required Emergency Venting', fmtVal(ev.required, fu), true) +
+      (t9
+        ? tableRow('Table 9 Minimum F (lowest tabulated row)', fmtVal(t9.F_min)) +
+          tableRow('Emergency Venting at Table 9 Minimum F', fmtVal(t9.required_at_F_min, fu))
+        : ''),
+      '',
+      t9 ? renderAlerts([{ severity: 'WARNING', message: t9.message }], []) : '');
   }
 
   if (o.scenarios.length > 0) html += renderScenarioResults(o);

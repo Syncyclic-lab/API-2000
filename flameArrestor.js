@@ -96,76 +96,96 @@
     };
   }
 
+  // Budget fraction → badge. Thresholds: FLAME_ARRESTOR.BUDGET_*_FRACTION.
+  function budgetBadge(fraction) {
+    if (fraction == null) return 'N/A';
+    if (fraction >= FA.BUDGET_FAILURE_FRACTION) return 'FAIL';
+    if (fraction >= FA.BUDGET_WARNING_FRACTION) return 'WARN';
+    return 'PASS';
+  }
+
+  // Worst badge of a device's relief paths (null entries are skipped).
+  function worstArrestorBadge(results) {
+    const order = ['N/A', 'PASS', 'WARN', 'FAIL'];
+    return results.filter(Boolean).map(r => r.badge)
+      .reduce((a, b) => (order.indexOf(b) > order.indexOf(a) ? b : a), 'N/A');
+  }
+
   /**
-   * Out-breathing capacity of a device fitted with a flame arrestor, used by
-   * engine.calcActualVenting.
+   * Flow through one relief path (out-breathing or inbreathing) of a device
+   * fitted with a flame arrestor, used by engine.calcActualVenting.
    *
-   * For PVRV/EPRV the arrestor ΔP lowers the pressure reaching the valve, which
-   * lowers the valve flow. valveFlow(P − ΔP(Q)) − Q decreases monotonically in Q,
-   * so bisection finds the unique self-consistent flow. Free-vent capacity is
-   * not reduced; the ΔP at that flow is reported only.
+   * The arrestor and the device are in series: the arrestor ΔP at flow Q leaves
+   * allowable − ΔP(Q) for the device, so the flow is the root of
+   * Q = capacity(allowable − ΔP(Q)). capacity is non-decreasing in p and ΔP
+   * increases with Q, so capacity(allowable − ΔP(Q)) − Q decreases monotonically
+   * and bisection on [0, capacity(allowable)] finds the unique root. Where the
+   * arrestor takes the whole allowable (p ≤ 0) the device passes nothing. ΔP,
+   * velocity and the pressure budget are reported at the converged flow.
    *
-   * @param {object} dev                      Device in SI (flows Nm³/h, pressures kPa g)
-   * @param {number} relievingPressureKpag    Tank allowable pressure, kPa g
-   * @param {object} ctx                      { molecular_weight, compressibility_factor,
-   *                                            temperature_C, pressure_kPa_abs } of the flowing gas
-   * @returns {{ flow_out:number, arrestor:object }}
+   * The budget is the share of the pressure that drives flow through the device
+   * taken by the arrestor: ΔP / allowable for open vents, ΔP / (allowable − set
+   * point) for valves, so a valve throttled down to its set point reads 100 %.
+   *
+   * @param {object} fa     { K, diameter_m }
+   * @param {object} path   { capacity(p) → Nm³/h, allowable, opening } from
+   *                        engine.reliefPath, pressures in gauge kPa (pressure or vacuum)
+   * @param {object} basis  Density basis of the flowing gas: { molecular_weight,
+   *                        compressibility_factor, temperature_C, pressure_kPa_abs }
+   * @returns {{ flow:number, arrestor:object }}
    */
-  function calcArrestedOutflow(dev, relievingPressureKpag, ctx = {}) {
-    const fa    = dev.flame_arrestor;
-    const rated = dev.rated_flow_outbreathing || 0;
+  function calcArrestedFlow(fa, path, basis = {}) {
+    const { capacity, allowable, opening = 0 } = path;
     const evalAt = (flow) => evaluateFlameArrestor({
       K:                          fa.K,
       diameter_m:                 fa.diameter_m,
       flow_Nm3hr:                 flow,
-      molecular_weight:           ctx.molecular_weight,
-      compressibility_factor:     ctx.compressibility_factor,
-      relieving_temperature_C:    ctx.temperature_C,
-      relieving_pressure_kPa_abs: ctx.pressure_kPa_abs,
+      molecular_weight:           basis.molecular_weight,
+      compressibility_factor:     basis.compressibility_factor,
+      relieving_temperature_C:    basis.temperature_C,
+      relieving_pressure_kPa_abs: basis.pressure_kPa_abs,
     });
+    const flowAt = (q) => {
+      const available = allowable - evalAt(q).deltaP_kPa;
+      return available > 0 ? capacity(available) : 0;
+    };
 
-    let flow_out = rated;
-    if (dev.type !== 'FREE_VENT') {
-      const valveFlow = (q) => engine.calcDeviceFlow(
-        dev.set_pressure, rated, dev.rated_overpressure_pct,
-        relievingPressureKpag - evalAt(q).deltaP_kPa,
-      );
-      let lo = 0;
-      let hi = valveFlow(0);
-      for (let i = 0; i < 60 && hi - lo > 1e-6 * Math.max(hi, 1); i++) {
-        const mid = (lo + hi) / 2;
-        if (valveFlow(mid) > mid) lo = mid;
-        else hi = mid;
-      }
-      flow_out = lo;
+    const unarrested = capacity(allowable) || 0;
+    // No pressure drop at all (K or diameter of 0): the unarrested flow stands.
+    let lo = evalAt(unarrested).deltaP_kPa > 0 ? 0 : unarrested;
+    let hi = unarrested;
+    // Relative tolerance on the current bracket; the iteration cap only binds
+    // for absurd K (1100 halvings span the whole double range).
+    for (let i = 0; i < 1100 && hi - lo > 1e-9 * hi; i++) {
+      const mid = (lo + hi) / 2;
+      if (flowAt(mid) > mid) lo = mid;
+      else hi = mid;
     }
+    const flow = lo;
 
-    const atFlow  = evalAt(flow_out);
-    const atRated = evalAt(rated);
-    const budget_fraction = relievingPressureKpag > 0 ? atRated.deltaP_kPa / relievingPressureKpag : null;
-    let badge = 'N/A';
-    if (budget_fraction != null) {
-      if (budget_fraction >= FA.BUDGET_FAILURE_FRACTION)      badge = 'FAIL';
-      else if (budget_fraction >= FA.BUDGET_WARNING_FRACTION) badge = 'WARN';
-      else                                                    badge = 'PASS';
-    }
-
+    const at = evalAt(flow);
+    const budget_kPa = allowable - opening;
+    const budget_fraction = unarrested > 0 && budget_kPa > 0 ? at.deltaP_kPa / budget_kPa : null;
     return {
-      flow_out,
+      flow,
       arrestor: {
-        K:                    fa.K,
-        diameter_m:           fa.diameter_m,
-        arrestor_class_key:   fa.arrestor_class_key ?? null,
-        deltaP_kPa:           atFlow.deltaP_kPa,
-        deltaP_mbar:          atFlow.deltaP_mbar,
-        deltaP_inH2O:         atFlow.deltaP_inH2O,
-        velocity_m_s:         atFlow.velocity_m_s,
-        density_kg_m3:        atFlow.density_kg_m3,
-        deltaP_at_rated_kPa:  atRated.deltaP_kPa,
+        allowable_kPa:   allowable,
+        opening_kPa:     opening,
+        budget_kPa,
+        unarrested_flow: unarrested,
+        effective_flow:  flow,
+        deltaP_kPa:      at.deltaP_kPa,
+        deltaP_mbar:     at.deltaP_mbar,
+        deltaP_inH2O:    at.deltaP_inH2O,
+        velocity_m_s:    at.velocity_m_s,
+        density_kg_m3:   at.density_kg_m3,
+        // Density basis actually used (audit trail).
+        molecular_weight: basis.molecular_weight,
+        temperature_K:    at.T_actual_K,
+        pressure_kPa_abs: basis.pressure_kPa_abs ?? PHYSICAL.P_ATM_KPA,
         budget_fraction,
-        budget_pct:           budget_fraction == null ? null : budget_fraction * 100,
-        badge,
-        effective_flow_Nm3hr: flow_out,
+        budget_pct:      budget_fraction == null ? null : budget_fraction * 100,
+        badge:           budgetBadge(budget_fraction),
       },
     };
   }
@@ -181,8 +201,10 @@
     out.push({
       severity: 'NOTICE',
       message:
-        'Flame arrestor ΔP uses a generic K-value with air-equivalent flow. Verify against the ' +
-        'manufacturer\'s certified ΔP-vs-Q capacity curve per ISO 16852 for regulatory-grade sizing.',
+        'Installed capacities of devices fitted with a flame arrestor include the arrestor pressure drop ' +
+        '(K-factor method, solved for a self-consistent flow). The K-value is generic and the flow is ' +
+        'air-equivalent; verify against the manufacturer\'s certified ΔP-vs-Q capacity curve per ISO 16852 ' +
+        'for regulatory-grade sizing.',
     });
 
     devices.forEach((d, i) => {
@@ -190,29 +212,36 @@
       if (!ar) return;
       const label = `Device #${i + 1}`;
 
-      if (ar.budget_fraction != null && ar.budget_fraction >= FA.BUDGET_FAILURE_FRACTION) {
-        out.push({
-          severity: 'WARNING',
-          message:
-            `${label}: Flame arrestor ΔP at rated flow (${ar.deltaP_at_rated_kPa.toFixed(2)} kPa) is ` +
-            `${ar.budget_pct.toFixed(0)} % of the MAWP. Installed vent capacity is likely inadequate; ` +
-            'increase the arrestor size or reduce the required flow.',
-        });
-      } else if (ar.budget_fraction != null && ar.budget_fraction >= FA.BUDGET_WARNING_FRACTION) {
-        out.push({
-          severity: 'WARNING',
-          message:
-            `${label}: Flame arrestor ΔP at rated flow consumes ${ar.budget_pct.toFixed(0)} % of the MAWP. ` +
-            'Vent adequacy margin is thin; verify with manufacturer capacity data.',
-        });
+      for (const [dir, name] of [['out', 'pressure'], ['in', 'vacuum']]) {
+        const r = ar[dir];
+        if (!r || r.budget_fraction == null) continue;
+        const where = `${label} (${dir === 'out' ? 'out-breathing' : 'inbreathing'})`;
+        const share = `${r.budget_pct.toFixed(0)} % of the ` + (r.opening_kPa > 0
+          ? `${r.budget_kPa.toFixed(2)} kPa between the set ${name} and the allowable ${name}`
+          : `${r.allowable_kPa.toFixed(2)} kPa allowable ${name}`);
+        if (r.budget_fraction >= FA.BUDGET_FAILURE_FRACTION) {
+          out.push({
+            severity: 'WARNING',
+            message:
+              `${where}: Flame arrestor ΔP at the effective flow (${r.deltaP_kPa.toFixed(2)} kPa) is ${share}. ` +
+              'The arrestor throttles the vent; increase the arrestor size or reduce the required flow.',
+          });
+        } else if (r.budget_fraction >= FA.BUDGET_WARNING_FRACTION) {
+          out.push({
+            severity: 'WARNING',
+            message:
+              `${where}: Flame arrestor ΔP at the effective flow consumes ${share}. ` +
+              'Vent adequacy margin is thin; verify with manufacturer capacity data.',
+          });
+        }
       }
 
-      if (d.type === 'FREE_VENT') {
+      if (d.type === 'FREE_VENT' && d.capacity_source !== 'calculated') {
         out.push({
           severity: 'NOTICE',
           message:
-            `${label}: Open-vent capacity is not reduced for the flame arrestor ΔP ` +
-            `(${ar.deltaP_kPa.toFixed(3)} kPa at the vent flow). Verify the combined vent + arrestor capacity.`,
+            `${label}: The manufacturer-rated free-vent flow is taken as quoted at the tank's allowable ` +
+            'pressure/vacuum and scaled as Q ∝ √p for the pressure left after the flame arrestor ΔP.',
         });
       }
 
@@ -234,7 +263,8 @@
     nm3hrToActualM3s,
     calcFlameArrestorDeltaP,
     evaluateFlameArrestor,
-    calcArrestedOutflow,
+    calcArrestedFlow,
+    worstArrestorBadge,
     generateArrestorWarnings,
   });
 })();

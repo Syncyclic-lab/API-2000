@@ -25,12 +25,15 @@
   const isFraction = (v) => isNonNegative(v) && v <= 1;
   const relievesOut = (d) => d.direction !== 'INBREATHING';
   const relievesIn  = (d) => d.direction !== 'OUTBREATHING';
+  // Temperature of the vapour leaving the tank vents (°C).
+  const ventTempC = (fluid) => fluid.relieving_temp_C ?? fluid.operating_temp_C ?? AMBIENT_C;
 
   // --- Other circumstances (§3.2.5) -------------------------------------------
   // API 2000 provides no calculation methods for these (§3.2.5.1). Each `calc`
   // returns { out, in } in Nm³/h of air-equivalent flow; `x.need` records
-  // missing inputs. `replacesThermal` scenarios combine only with liquid
-  // movement when marked coincident with normal venting.
+  // missing inputs and `x.used` echoes the inputs actually used (defaults
+  // included) to the audit trail. `replacesThermal` scenarios combine only with
+  // liquid movement when marked coincident with normal venting.
 
   // Unit converter (uc.*) for each scenario input, by field name.
   const SCENARIO_FIELD_UNITS = {
@@ -49,6 +52,8 @@
       // Increase over the normal maximum fill / empty rate.
       calc: (d, x) => {
         x.need(d.failed_inflow != null || d.failed_outflow != null, 'enter the liquid inflow and/or outflow with the valve failed open');
+        x.used('Liquid inflow, valve failed open', d.failed_inflow, 'm³/h');
+        x.used('Liquid outflow, valve failed open', d.failed_outflow, 'm³/h');
         return {
           out: Math.max(0, (d.failed_inflow ?? 0) - x.fluid.fill_m3hr) * x.fillFactor,
           in:  Math.max(0, (d.failed_outflow ?? 0) - x.fluid.empty_m3hr) * x.emptyFactor,
@@ -83,10 +88,15 @@
         x.need(area > 0, 'enter the exposed shell and roof area (or the tank dimensions)');
         x.need(d.vapor_temp != null, 'enter the vapor-space temperature');
         if (!(area > 0) || d.vapor_temp == null) return { out: 0, in: 0 };
-        const deltaT = d.vapor_temp - (d.wall_temp ?? SC.RAIN_WALL_TEMP_C);
+        const wallTempC = d.wall_temp ?? SC.RAIN_WALL_TEMP_C;
+        const htc = d.htc ?? GEN.H_INSIDE_DEFAULT;
+        x.used('Exposed area', area, 'm²');
+        x.used('Vapor-space temperature', d.vapor_temp, '°C');
+        x.used('Rain-cooled wall temperature', wallTempC, '°C');
+        x.used('Inside heat-transfer coefficient', htc, 'W/(m²·K)');
         return {
           out: 0,
-          in: engine.calcHotTankInbreathing(area, d.htc ?? GEN.H_INSIDE_DEFAULT, deltaT, d.vapor_temp + PHYSICAL.C_TO_K),
+          in: engine.calcHotTankInbreathing(area, htc, d.vapor_temp - wallTempC, d.vapor_temp + PHYSICAL.C_TO_K),
         };
       },
     },
@@ -97,6 +107,8 @@
         let out = d.heat_input > 0 ? x.vaporFromHeat(d.heat_input) : 0;
         if (d.gas_generation > 0) {
           x.need(d.gas_mw > 0, 'enter the molecular weight of the generated gas');
+          x.used('Gas generation rate', d.gas_generation, 'kg/h');
+          x.used('Generated gas molecular weight', d.gas_mw, '');
           if (d.gas_mw > 0) out += engine.airEquivalentFlow(d.gas_generation, d.gas_mw, x.ventTempK);
         }
         return { out, in: 0 };
@@ -110,6 +122,8 @@
         x.need(ok, 'enter the volatile inflow, liquid density, fraction vaporized (0–100 %) and vapor molecular weight');
         if (!ok) return { out: 0, in: 0 };
         const vapourKgH = d.volatile_flow * d.density * d.flash_percent / 100;
+        x.used('Flashed vapor', vapourKgH, 'kg/h');
+        x.used('Vapor molecular weight', d.gas_mw, '');
         return { out: engine.airEquivalentFlow(vapourKgH, d.gas_mw, x.ventTempK), in: 0 };
       },
     },
@@ -126,6 +140,7 @@
       label: 'Atmospheric pressure change', ref: '§3.2.5.11',
       calc: (d, x) => {
         x.need(d.rate > 0, 'enter the barometric pressure change rate');
+        x.used('Barometric change rate', d.rate, 'kPa/h');
         const q = d.rate > 0 ? engine.calcBarometricBreathing(x.tank.volume_m3, d.rate, x.ventTempK) : 0;
         return { out: q, in: q };
       },
@@ -149,34 +164,57 @@
     const errors = [];
     const P_ATM = PHYSICAL.P_ATM_KPA;
     const perUnit = engine.calcLiquidMovement(s.method, 1, 1, normal.is_volatile);
-    const ventTempK = (s.fluid.relieving_temp_C ?? s.fluid.operating_temp_C ?? AMBIENT_C) + PHYSICAL.C_TO_K;
+    const ventTempK = ventTempC(s.fluid) + PHYSICAL.C_TO_K;
 
     const items = Object.entries(s.scenarios).filter(([key]) => SCENARIO_DEFS[key]).map(([key, d]) => {
       const def = SCENARIO_DEFS[key];
       const need = (ok, message) => { if (!ok) errors.push(`${def.label}: ${message}.`); };
+      const audit = [];
+      const used = (label, value, unit) => { if (Number.isFinite(value)) audit.push([label, value, unit]); };
 
       // Gas entering the vapour space (Nm³/h of gas from a known flow or Annex D
       // nozzle flow into the tank at MAWP), as air-equivalent vent flow.
+      // Convention: the nozzle mass flow is taken at the gas temperature and the
+      // air equivalent at the tank vent temperature in √(T/M) (Eq. D.37); about
+      // 3.7 % conservative against a single-temperature treatment (15.6 °C gas,
+      // 37.5 °C vent). Kept deliberately.
       const gasInflow = (g, { k = SC.GAS_K, ends = 1 } = {}) => {
         need(g.gas_mw > 0, 'enter the gas molecular weight');
         let gasNm3h = g.known_flow;
         if (gasNm3h == null) {
           need(g.supply_pressure > 0 && g.diameter > 0, 'enter the supply pressure and flow diameter, or a known gas flow');
+          const gasTempC = g.gas_temp ?? AMBIENT_C;
+          const cd = g.cd ?? SC.DEFAULT_CD;
+          const backPressure = P_ATM + s.tank.mawp_kpag;
           gasNm3h = ends * engine.calculateOpenVentCapacity(
-            g.diameter, P_ATM + g.supply_pressure, P_ATM + s.tank.mawp_kpag, k,
-            (g.gas_temp ?? AMBIENT_C) + PHYSICAL.C_TO_K, g.gas_mw, 1, g.cd ?? SC.DEFAULT_CD);
+            g.diameter, P_ATM + g.supply_pressure, backPressure, k,
+            gasTempC + PHYSICAL.C_TO_K, g.gas_mw, 1, cd);
+          used('Supply pressure', g.supply_pressure, 'kPa(g)');
+          used('Flow diameter', g.diameter / CONVERSIONS.MM_TO_M, 'mm');
+          used('Discharge coefficient Cd', cd, '');
+          used('Ratio of specific heats k', k, '');
+          used('Gas temperature (nozzle flow)', gasTempC, '°C');
+          used('Back-pressure (tank at MAWP)', backPressure, 'kPa(a)');
+          if (ends > 1) used('Tube ends releasing', ends, '');
         }
+        used('Gas molecular weight', g.gas_mw, '');
+        used(g.known_flow == null ? 'Gas flow (nozzle)' : 'Gas flow (entered)', gasNm3h, 'Nm³/h of gas');
+        used('Vent temperature (air equivalent)', ventTempK, 'K');
         return g.gas_mw > 0 ? engine.airEquivalentFlow(gasNm3h * g.gas_mw / PHYSICAL.MOLAR_VOL_NM3, g.gas_mw, ventTempK) : 0;
       };
       // Vapour generated by a heat input Q (W): W = Q / L.
       const vaporFromHeat = (heatW) => {
         const { latent_J_kg: L, molecular_weight: M } = s.fluid;
         need(L > 0 && M > 0, 'enter the fluid latent heat and molecular weight (Fluid section)');
+        used('Heat input', heatW, 'W');
+        used('Latent heat L', L, 'J/kg');
+        used('Molecular weight M', M, '');
+        used('Vent temperature (air equivalent)', ventTempK, 'K');
         return L > 0 && M > 0 ? engine.airEquivalentFlow(heatW / L * PHYSICAL.SECONDS_PER_HOUR, M, ventTempK) : 0;
       };
 
       const load = def.calc(d, {
-        need, gasInflow, vaporFromHeat, ventTempK,
+        need, used, gasInflow, vaporFromHeat, ventTempK,
         tank: s.tank, fluid: s.fluid, fillFactor: perUnit.liquid_out, emptyFactor: perUnit.liquid_in,
       });
       const base = def.replacesThermal
@@ -194,6 +232,7 @@
         total_out:   withNormal(load.out, base.out),
         total_in:    withNormal(load.in, base.in),
         input:       d,
+        audit,
       };
     });
     return { items, errors };
@@ -313,6 +352,14 @@
         need(isNonNegative(fire.manual_wetted_m2), 'The manual wetted area cannot be negative.');
       }
     }
+
+    s.devices.forEach((d, i) => {
+      const fa = d.flame_arrestor;
+      if (fa) {
+        need(Number.isFinite(fa.K) && fa.K >= 0 && Number.isFinite(fa.diameter_m) && fa.diameter_m > 0,
+          `Device #${i + 1}: enter a finite flame arrestor K and a nominal diameter greater than zero.`);
+      }
+    });
     return errors;
   }
 
@@ -354,10 +401,27 @@
     const basis = fire.basis === 'FLUID'
       ? { L: fluid.latent_J_kg, M: fluid.molecular_weight, T_K: fluid.relieving_temp_C + PHYSICAL.C_TO_K }
       : FIRE.HEXANE;
+
+    // Below the lowest tabulated Table 9 row, F is extrapolated with note b; the
+    // tabulated minimum is kept alongside it for comparison (F is not changed).
+    let table9 = null;
+    if (fire.environmental_factor === 'INSULATED') {
+      const conductance = env.conductivity / env.thickness_m;
+      if (conductance < FIRE.TABLE9_MIN_CONDUCTANCE_W_M2K) {
+        const F_min = FIRE.TABLE9_MIN_INSULATED_F;
+        table9 = {
+          conductance,
+          F_min,
+          emergency_out_at_F_min: engine.calcEmergencyVenting(heat_input_W, F_min, basis.L, basis.M, basis.T_K).emergency_out,
+        };
+      }
+    }
+
     return {
       ...wetted,
       heat_input_W,
       F,
+      table9,
       basis: fire.basis,
       L: basis.L,
       M: basis.M,
@@ -366,7 +430,8 @@
     };
   }
 
-  // Converts devices to SI and computes calculated open-vent capacities.
+  // Converts devices to SI and gives calculated open vents their capacity as a
+  // function of the pressure (or vacuum) p across the vent, gauge kPa.
   function devicesToSI(s) {
     const { us, tank, fluid } = s;
     const c = (fn, v) => (v == null ? null : fn(v, us));
@@ -374,9 +439,9 @@
     // Open vents are sized at the tank allowable pressure/vacuum with air
     // properties (air-equivalent flow, Annex D.9). Atmospheric tanks entered with
     // MAWP/MAWV = 0 use a default allowable accumulation instead.
-    const allowP = tank.mawp_kpag > 0 ? tank.mawp_kpag : OPEN_VENT.ATM_DEFAULT_ALLOWABLE_KPA;
-    const allowV = tank.mawv_kpag > 0 ? tank.mawv_kpag : OPEN_VENT.ATM_DEFAULT_ALLOWABLE_KPA;
-    const vapourTempC = fluid.relieving_temp_C ?? fluid.operating_temp_C ?? AMBIENT_C;
+    const allowP = engine.openVentAllowable(tank.mawp_kpag);
+    const allowV = engine.openVentAllowable(tank.mawv_kpag);
+    const vapourTempC = ventTempC(fluid);
     let atmDefaultUsed = false;
 
     const devices = s.devices.map(d => {
@@ -387,28 +452,48 @@
         rated_flow_outbreathing: c(uc.toNm3hr, d.rated_flow_outbreathing),
         rated_flow_inbreathing:  c(uc.toNm3hr, d.rated_flow_inbreathing),
       };
-      if (d.type === 'FREE_VENT' && d.capacity_source === 'calculated') {
+      if (d.type !== 'FREE_VENT') return dev;
+      if (d.capacity_source === 'calculated') {
         const diameter = c(uc.smallLengthToM, d.pipe_diameter);
         const Cd = d.discharge_coefficient ?? OPEN_VENT.DEFAULT_CD;
+        // Air basis: vapour temperature (out-breathing) or ambient (inbreathing)
+        // with M = 28.96, rather than Annex D's 273.15 K and M = 29. That gives
+        // about 6 % less out-breathing (at 37.5 °C) and 3 % less inbreathing
+        // capacity, i.e. conservative. Kept deliberately.
         const capacity = (pIn, pOut, tempC) => engine.calculateOpenVentCapacity(
           diameter, pIn, pOut, AIR.k, tempC + PHYSICAL.C_TO_K, AIR.M, AIR.Zi, Cd);
         dev.pipe_diameter_m = diameter;
         dev.discharge_coefficient = Cd;
-        if (relievesOut(d)) {
-          dev.rated_flow_outbreathing = capacity(P_ATM + allowP, P_ATM, vapourTempC);
-          atmDefaultUsed = atmDefaultUsed || !(tank.mawp_kpag > 0);
-        }
-        if (relievesIn(d)) {
-          dev.rated_flow_inbreathing = capacity(P_ATM, Math.max(P_ATM - allowV, 0.1), AMBIENT_C);
-          atmDefaultUsed = atmDefaultUsed || !(tank.mawv_kpag > 0);
-        }
+        dev.capacity_out = (p) => capacity(P_ATM + p, P_ATM, vapourTempC);
+        dev.capacity_in  = (p) => capacity(P_ATM, Math.max(P_ATM - p, 0.1), AMBIENT_C);
+        if (relievesOut(d)) dev.rated_flow_outbreathing = dev.capacity_out(allowP);
+        if (relievesIn(d))  dev.rated_flow_inbreathing  = dev.capacity_in(allowV);
+      }
+      // Calculated vents, and rated vents behind an arrestor, are evaluated at the allowable.
+      if (d.capacity_source === 'calculated' || d.flame_arrestor) {
+        if (relievesOut(d)) atmDefaultUsed = atmDefaultUsed || !(tank.mawp_kpag > 0);
+        if (relievesIn(d))  atmDefaultUsed = atmDefaultUsed || !(tank.mawv_kpag > 0);
       }
       return dev;
     });
-    return { devices, atmDefaultUsed };
+    return { devices, atmDefaultUsed, vapourTempC };
   }
 
   // --- Warnings ---------------------------------------------------------------
+
+  const flowText = (nm3hr, us) =>
+    `${round(uc.flowToOutput(nm3hr, us), 1).toLocaleString('en-US')} ${us === 'US' ? 'SCFH' : 'Nm³/h'}`;
+
+  // Insulated F extrapolated below the lowest tabulated Table 9 row.
+  function table9Message(fireCase, us) {
+    const { conductance, F_min, emergency_out_at_F_min } = fireCase.table9;
+    const usConductance = us === 'US'
+      ? ` (${(conductance / CONVERSIONS.BTU_HR_FT2_F_TO_W_M2_K).toFixed(3)} BTU/(h·ft²·°F))` : '';
+    return `Insulation conductance λ/t = ${conductance.toFixed(2)} W/(m²·K)${usConductance} is below the lowest ` +
+      `tabulated Table 9 row (${FIRE.TABLE9_MIN_CONDUCTANCE_W_M2K} W/(m²·K), F = ${F_min}). ` +
+      `F = ${fireCase.F.toPrecision(3)} has been extrapolated with Table 9 note b, giving ${flowText(fireCase.emergency_out, us)}; ` +
+      `the Table 9 minimum F = ${F_min} would give ${flowText(emergency_out_at_F_min, us)}. Engineering judgment is required.`;
+  }
 
   function collectWarnings(s, fireCase, actual, atmDefaultUsed, scenarios) {
     const out = [];
@@ -512,6 +597,9 @@
         notice('Insulation F-factor credit requires fire-resistant insulation over the wetted area that resists ' +
           'dislodgment by fire-fighting equipment (Table 9 note a).');
       }
+      if (fireCase.table9) {
+        warn(table9Message(fireCase, s.us));
+      }
     }
 
     if (tank.mawp_kpag > MAX_SCOPE_PRESSURE_KPA) {
@@ -591,12 +679,15 @@
         const converted = devicesToSI(s);
         atmDefaultUsed = converted.atmDefaultUsed;
         // Venting capacities are air-equivalent flows (Annex D.9), so the arrestor
-        // ΔP is evaluated with air at normal temperature and the relieving pressure.
+        // ΔP uses air at the temperature of each direction's capacity basis and the
+        // upstream pressure: vapour leaving the tank at its allowable pressure
+        // (out-breathing), ambient air drawn in at atmospheric pressure (inbreathing).
+        const air = (temperature_C, pressure_kPa_abs) => ({
+          molecular_weight: AIR.M, compressibility_factor: AIR.Zi, temperature_C, pressure_kPa_abs,
+        });
         actual = engine.calcActualVenting(converted.devices, tank.mawp_kpag, tank.mawv_kpag, {
-          molecular_weight:       AIR.M,
-          compressibility_factor: AIR.Zi,
-          temperature_C:          0,
-          pressure_kPa_abs:       PHYSICAL.P_ATM_KPA + tank.mawp_kpag,
+          out: air(converted.vapourTempC, PHYSICAL.P_ATM_KPA + engine.openVentAllowable(tank.mawp_kpag)),
+          in:  air(AMBIENT_C, PHYSICAL.P_ATM_KPA),
         });
       }
 
@@ -605,6 +696,15 @@
       // --- Output in display units ---
       const flow = (nm3hr) => round(uc.flowToOutput(nm3hr, us), 1);
       const meta = inputs.meta;
+      const arrestorPath = (a) => (a ? {
+        deltaP_mbar:     round(a.deltaP_mbar, 2),
+        deltaP_inH2O:    round(a.deltaP_inH2O, 2),
+        velocity_m_s:    round(a.velocity_m_s, 2),
+        budget_pct:      round(a.budget_pct, 1),
+        unarrested_flow: flow(a.unarrested_flow),
+        effective_flow:  flow(a.effective_flow),
+        badge:           a.badge,
+      } : null);
 
       const outputs = {
         unit_system: us,
@@ -642,6 +742,13 @@
           basis:              fireCase.basis,
           required:           flow(fireCase.emergency_out),
           vapour_mass_flow:   round(uc.massToOutput(fireCase.vapour_mass_flow_kg_hr, us), 1),
+          // Set when F is extrapolated below the lowest tabulated Table 9 row.
+          table9_extrapolated: fireCase.table9 ? {
+            F:                  Number(fireCase.F.toPrecision(3)),
+            F_min:              fireCase.table9.F_min,
+            required_at_F_min:  flow(fireCase.table9.emergency_out_at_F_min),
+            message:            table9Message(fireCase, us),
+          } : null,
         } : null,
 
         scenarios: scenarios.items.map(i => ({
@@ -687,11 +794,9 @@
             flow_out:  flow(d.flow_out),
             flow_in:   flow(d.flow_in),
             arrestor:  d.arrestor ? {
-              deltaP_mbar:    round(d.arrestor.deltaP_mbar, 2),
-              deltaP_inH2O:   round(d.arrestor.deltaP_inH2O, 2),
-              budget_pct:     round(d.arrestor.budget_pct, 1),
-              effective_flow: flow(d.arrestor.effective_flow_Nm3hr),
-              badge:          d.arrestor.badge,
+              badge: d.arrestor.badge,
+              out:   arrestorPath(d.arrestor.out),
+              in:    arrestorPath(d.arrestor.in),
             } : null,
           })),
         } : null,
@@ -724,11 +829,46 @@
           ['Relieving temperature T',       round(fireCase.T_K, 2),            'K'],
           ['Emergency venting (Eq. 14)',    round(fireCase.emergency_out, 1),  'Nm³/h'],
         );
+        if (fireCase.table9) {
+          intermediates.push(
+            ['Insulation conductance λ/t (below Table 9)', round(fireCase.table9.conductance, 3), 'W/(m²·K)'],
+            ['Table 9 minimum insulated F',                fireCase.table9.F_min,                 ''],
+            ['Emergency venting at Table 9 minimum F',     round(fireCase.table9.emergency_out_at_F_min, 1), 'Nm³/h'],
+          );
+        }
       }
       for (const i of scenarios.items) {
+        for (const [label, value, unit] of i.audit) intermediates.push([`${i.label} — ${label}`, round(value, 3), unit]);
         if (i.out > 0) intermediates.push([`${i.label} — out-breathing load`, round(i.out, 2), 'Nm³/h']);
         if (i.in > 0)  intermediates.push([`${i.label} — inbreathing load`, round(i.in, 2), 'Nm³/h']);
       }
+      (actual ? actual.devices : []).forEach((d, i) => {
+        const a = d.arrestor;
+        if (!a) return;
+        const tag = `Device #${i + 1} arrestor`;
+        intermediates.push(
+          [`${tag} — K`,           a.K,                                  ''],
+          [`${tag} — nominal ID`,  round(a.diameter_m / CONVERSIONS.MM_TO_M, 2), 'mm'],
+        );
+        for (const [dir, name] of [['out', 'out-breathing'], ['in', 'inbreathing']]) {
+          const r = a[dir];
+          if (!r) continue;
+          const at = `${tag}, ${name}`;
+          intermediates.push(
+            [`${at} — density basis M`,          r.molecular_weight,             ''],
+            [`${at} — density basis T`,          round(r.temperature_K, 2),      'K'],
+            [`${at} — density basis P`,          round(r.pressure_kPa_abs, 3),   'kPa(a)'],
+            [`${at} — gas density`,              round(r.density_kg_m3, 4),      'kg/m³'],
+            [`${at} — allowable`,                round(r.allowable_kPa, 3),      'kPa'],
+            [`${at} — capacity without arrestor`, round(r.unarrested_flow, 1),   'Nm³/h'],
+            [`${at} — effective capacity`,       round(r.effective_flow, 1),     'Nm³/h'],
+            [`${at} — ΔP at effective flow`,     round(r.deltaP_kPa, 4),         'kPa'],
+            [`${at} — velocity at effective flow`, round(r.velocity_m_s, 2),     'm/s'],
+            [`${at} — pressure budget`,          round(r.budget_kPa, 3),         'kPa'],
+            [`${at} — budget used`,              round(r.budget_pct, 1),         '%'],
+          );
+        }
+      });
 
       return { outputs, intermediates, warnings, errors: [] };
     } catch (err) {
