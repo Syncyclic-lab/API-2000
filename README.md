@@ -31,6 +31,9 @@ US units are converted to SI at the input boundary; flows convert at
 - `legal.html`, `privacy.html`, `terms.html`, `accessibility.html` — legal notice, privacy notice, terms of use
   and accessibility statement
 
+CSS, JS and icon links carry a `?v=` version so browsers don't pair a new page with a cached old script
+(GitHub Pages caches for 10 minutes). Bump it in every HTML page whenever those files change.
+
 The site loads nothing from third parties and sets no cookies or browser storage, so it needs no consent
 banner. Keep it that way, or update `privacy.html` (and add consent) before adding analytics, web fonts or
 embeds. The Content-Security-Policy in each page enforces this (`default-src 'none'`, no inline styles or scripts).
