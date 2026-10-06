@@ -8,7 +8,7 @@
 'use strict';
 
 (function () {
-  const { PHYSICAL, GENERAL_METHOD: GEN, ANNEX_A, FIRE, SCENARIOS } = window.API2000;
+  const { PHYSICAL, GENERAL_METHOD: GEN, ANNEX_A, FIRE, SCENARIOS, OPEN_VENT } = window.API2000;
 
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
@@ -224,38 +224,71 @@
     return ratedFlow * (tankPressure - setPressure) / (ratedPressure - setPressure);
   }
 
+  // Allowable pressure or vacuum (gauge kPa) an open vent is evaluated at: the
+  // tank MAWP/MAWV, or a default accumulation for atmospheric tanks entered as 0.
+  function openVentAllowable(limitKpa) {
+    return limitKpa > 0 ? limitKpa : OPEN_VENT.ATM_DEFAULT_ALLOWABLE_KPA;
+  }
+
+  // One relief path of a device ('out' or 'in'): its capacity (Nm³/h) as a
+  // function of the pressure or vacuum p available to it (gauge kPa), the
+  // allowable p it is evaluated at, and the p at which it starts to flow.
+  function reliefPath(dev, dir, tankLimitKpa) {
+    const out = dir === 'out';
+    const rated = (out ? dev.rated_flow_outbreathing : dev.rated_flow_inbreathing) || 0;
+    if (dev.type === 'FREE_VENT') {
+      const allowable = openVentAllowable(tankLimitKpa);
+      // Vents calculated from pipe geometry carry their nozzle-flow function
+      // (index.js). A manufacturer rating is assumed to be quoted at the tank's
+      // allowable pressure/vacuum and is scaled as Q ∝ √p (flow through a fixed
+      // resistance), so capacity(allowable) is exactly the rated flow.
+      const capacity = (out ? dev.capacity_out : dev.capacity_in)
+        ?? ((p) => (p > 0 ? rated * Math.sqrt(p / allowable) : 0));
+      return { allowable, opening: 0, capacity };
+    }
+    const setPoint = out ? dev.set_pressure : dev.set_vacuum;
+    return {
+      allowable: tankLimitKpa,
+      opening: setPoint ?? 0,
+      capacity: (p) => calcDeviceFlow(setPoint, rated, dev.rated_overpressure_pct, p),
+    };
+  }
+
   // Evaluates every device at the tank's allowable pressure and vacuum (gauge kPa).
   // Normal out-breathing excludes EPRVs; emergency out-breathing includes every
-  // pressure-relieving device (§3.3.3.3.5). Devices carrying a flame arrestor are
-  // evaluated by flameArrestor.js using `arrestorContext`.
-  function calcActualVenting(devices, relievingPressureKpag, relievingVacuumKpag, arrestorContext) {
+  // pressure-relieving device (§3.3.3.3.5). A flame arrestor sits in both relief
+  // paths; flameArrestor.js solves each path for the flow left after the arrestor
+  // ΔP, with the gas density basis arrestorContext.out / arrestorContext.in.
+  function calcActualVenting(devices, relievingPressureKpag, relievingVacuumKpag, arrestorContext = {}) {
     let normal_out = 0;
     let emergency_out = 0;
     let inbreathing = 0;
 
     const evaluated = devices.map(dev => {
+      const fa = dev.flame_arrestor;
+      const arrestor = fa
+        ? { K: fa.K, diameter_m: fa.diameter_m, arrestor_class_key: fa.arrestor_class_key ?? null, out: null, in: null }
+        : null;
+      const evaluate = (dir, tankLimitKpa) => {
+        const path = reliefPath(dev, dir, tankLimitKpa);
+        if (!fa) return path.capacity(path.allowable);
+        const solved = engine.calcArrestedFlow(fa, path, arrestorContext[dir]);
+        arrestor[dir] = solved.arrestor;
+        return solved.flow;
+      };
+
       let flow_out = 0;
       let flow_in = 0;
-      let arrestor = null;
-
       if (dev.direction !== 'INBREATHING') {
-        if (dev.flame_arrestor) {
-          ({ flow_out, arrestor } = engine.calcArrestedOutflow(dev, relievingPressureKpag, arrestorContext));
-        } else {
-          flow_out = dev.type === 'FREE_VENT'
-            ? (dev.rated_flow_outbreathing || 0)
-            : calcDeviceFlow(dev.set_pressure, dev.rated_flow_outbreathing, dev.rated_overpressure_pct, relievingPressureKpag);
-        }
+        flow_out = evaluate('out', relievingPressureKpag);
         emergency_out += flow_out;
         if (dev.type !== 'EPRV') normal_out += flow_out;
       }
-
       if (dev.direction !== 'OUTBREATHING') {
-        flow_in = dev.type === 'FREE_VENT'
-          ? (dev.rated_flow_inbreathing || 0)
-          : calcDeviceFlow(dev.set_vacuum, dev.rated_flow_inbreathing, dev.rated_overpressure_pct, relievingVacuumKpag);
+        flow_in = evaluate('in', relievingVacuumKpag);
         inbreathing += flow_in;
       }
+      if (arrestor) arrestor.badge = engine.worstArrestorBadge([arrestor.out, arrestor.in]);
 
       return { ...dev, flow_out, flow_in, arrestor };
     });
@@ -281,6 +314,8 @@
     calcBarometricBreathing,
     calculateOpenVentCapacity,
     calcDeviceFlow,
+    openVentAllowable,
+    reliefPath,
     calcActualVenting,
   };
 })();

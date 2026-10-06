@@ -14,7 +14,7 @@ https://syncyclic-lab.github.io/API-2000/
 | Environmental factor | Table 9 (bare, insulated from conductance, impoundment, earth-covered, underground, custom). |
 | Emergency venting | Selectable basis: **Eq. 14** `q = 906.6·Q·F/L·√(T/M)` with the stored fluid's latent heat, molecular weight and relieving temperature (default), or the **hexane basis** of Tables 5/7 and Eq. 16 for hexane-like fluids (warns if the entered fluid differs from hexane by more than 10 %). The normal-venting method selection does not affect this. |
 | Other circumstances (§3.2.5) | API 2000 gives no methods (§3.2.5.1), so these are engineering estimates: control-valve failure (excess liquid flow × Table A.1 / Eq. 1–5 factors), blanket-gas and pressure-transfer gas inflow and heat-exchanger tube rupture (Annex D nozzle flow), abnormal heat / exothermic reaction / mixing (vapour = Q/L or flashed mass), hot tank in rain (Annex A Eq. A.3), barometric change (V·dp/dt / p); all as air-equivalent flow (Eq. D.37). Each can be coincident with normal venting and routed to normal or emergency devices; the largest contingency on each path governs (§3.3.1, §3.6.1). Liquid overfill adds no load (§3.2.5.10). |
-| Installed devices | Rated capacity at MAWP / MAWV with linear partial lift; open vents from isentropic nozzle flow of air (Annex D); optional flame-arrestor ΔP (K-factor, ISO 16852) solved for a self-consistent valve flow. |
+| Installed devices | Rated capacity at MAWP / MAWV with linear partial lift; open vents from isentropic nozzle flow of air (Annex D). An optional flame arrestor (K-factor ΔP, ISO 16852) sits in both relief paths: each path is solved for the self-consistent flow `Q = capacity(allowable − ΔP(Q))`, with the ΔP evaluated for air at that direction's capacity temperature and upstream pressure. A manufacturer-rated open vent is taken as rated at the tank allowable and scaled as `Q ∝ √p`. |
 
 US units are converted to SI at the input boundary; flows convert at
 1 SCF (60 °F) = 0.026793 Nm³ (0 °C), Annex D Eq. (D.2).
@@ -34,5 +34,10 @@ US units are converted to SI at the input boundary; flows convert at
 npm install
 npm test
 ```
+
+`npm test` runs the Jest suites and then `test/acceptance.js`, a dependency-free script of
+plain assertions (flame-arrestor derating, Table 9 range warning and hand-calculated
+regression values). It also runs on its own with `node test/acceptance.js`, or in a browser:
+serve the folder over HTTP and open `test/acceptance.html`.
 
 Results are for information only and must be verified by a qualified engineer against the standard.
