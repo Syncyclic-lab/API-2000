@@ -1,8 +1,9 @@
 /* ============================================================
    styles.css — API 2000 Venting Calculator (all pages)
-   System fonts only (no third-party requests). Light and dark
-   themes follow the operating-system setting. Text colours meet
-   WCAG 2.1 AA contrast (4.5:1 text, 3:1 control borders).
+   Installed fonts only (no third-party requests). Colours follow
+   the Ecolab brand palette. Light and dark themes follow the
+   operating-system setting. Text colours meet WCAG 2.1 AA
+   contrast (4.5:1 text, 3:1 control borders).
    ============================================================ */
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -12,66 +13,68 @@
 :root {
   color-scheme: light dark;
 
-  --bg:            #f3f5f8;
+  /* Ecolab brand palette (ecolab.com): Ecolab Blue #006BD3, dark blue #044EA0,
+     charcoal #313233 on cool-grey neutrals. */
+  --bg:            #f4f6f9;
   --surface:       #ffffff;
-  --surface-2:     #f7f9fb;
-  --surface-3:     #edf1f6;
-  --border:        #dde3ea;
-  --border-strong: #c5ced9;
-  --control-border:#7f8ea1;   /* ≥ 3:1 on surface (WCAG 1.4.11) */
-  --text:          #14202e;
-  --text-2:        #3b4a5c;
-  --text-3:        #556476;   /* muted text, ≥ 4.5:1 on surface-2 */
-  --ink:           #0d2137;   /* header */
+  --surface-2:     #f7f8fa;
+  --surface-3:     #eceff3;
+  --border:        #dfe3e8;
+  --border-strong: #c3cad3;
+  --control-border:#7a828c;   /* ≥ 3:1 on surface (WCAG 1.4.11) */
+  --text:          #313233;
+  --text-2:        #46494c;
+  --text-3:        #5c6064;   /* muted text, ≥ 4.5:1 on surface-3 */
+  --ink:           #044ea0;   /* header: Ecolab dark blue */
   --ink-text:      #ffffff;
-  --ink-muted:     #b9c7d8;
+  --ink-muted:     #d6e5f7;
 
-  --accent:          #1d5fcf;
-  --accent-hover:    #174fae;
+  --accent:          #006bd3; /* Ecolab Blue */
+  --accent-hover:    #044ea0;
   --accent-contrast: #ffffff;
-  --accent-soft:     #e8f0fd;
-  --accent-border:   #b7cdf2;
+  --accent-soft:     #edf4fd;
+  --accent-border:   #a9cbf0;
 
-  --success:        #146c36;
-  --success-soft:   #e6f4eb;
-  --success-border: #a7d6b7;
+  --success:        #137040;
+  --success-soft:   #e7f5ec;
+  --success-border: #a5d5b8;
   --warning:        #8a5100;
   --warning-soft:   #fff4e0;
   --warning-border: #efcc8f;
-  --danger:         #b3261e;
-  --danger-soft:    #fdecea;
-  --danger-border:  #f1b6b0;
+  --danger:         #b83000;
+  --danger-soft:    #fdeee8;
+  --danger-border:  #f2b9a5;
 
   --radius:    12px;
   --radius-sm: 8px;
-  --shadow-sm: 0 1px 2px rgba(13, 33, 55, .06), 0 1px 3px rgba(13, 33, 55, .06);
-  --shadow-md: 0 4px 16px rgba(13, 33, 55, .08);
+  --shadow-sm: 0 1px 2px rgba(4, 39, 80, .06), 0 1px 3px rgba(4, 39, 80, .06);
+  --shadow-md: 0 4px 16px rgba(4, 39, 80, .08);
 
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font: Roboto, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg:            #0b131d;
-    --surface:       #131d29;
-    --surface-2:     #172331;
-    --surface-3:     #1d2b3c;
-    --border:        #263649;
-    --border-strong: #34475d;
-    --control-border:#62758c;
-    --text:          #e7edf4;
-    --text-2:        #bccad8;
-    --text-3:        #97a7b9;
-    --ink:           #08101a;
-    --ink-text:      #e7edf4;
-    --ink-muted:     #9fb1c5;
+    --bg:            #0a121d;
+    --surface:       #111b28;
+    --surface-2:     #152131;
+    --surface-3:     #1b2a3d;
+    --border:        #24354a;
+    --border-strong: #33475f;
+    --control-border:#64788f;
+    --text:          #e8edf3;
+    --text-2:        #bdcad8;
+    --text-3:        #98a8ba;
+    --ink:           #03264c;
+    --ink-text:      #e8edf3;
+    --ink-muted:     #a9c4e4;
 
-    --accent:          #74abff;
-    --accent-hover:    #96c0ff;
-    --accent-contrast: #061528;
-    --accent-soft:     #172c49;
-    --accent-border:   #2c4d7a;
+    --accent:          #5eaaf5;
+    --accent-hover:    #8cc3fa;
+    --accent-contrast: #04172d;
+    --accent-soft:     #0f2947;
+    --accent-border:   #23508a;
 
     --success:        #6fd396;
     --success-soft:   #10291b;
@@ -79,9 +82,9 @@
     --warning:        #f3bb62;
     --warning-soft:   #2d2210;
     --warning-border: #5a4419;
-    --danger:         #ff8f86;
-    --danger-soft:    #341614;
-    --danger-border:  #6a2a26;
+    --danger:         #ff8f7a;
+    --danger-soft:    #361812;
+    --danger-border:  #6d2c20;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, .35);
@@ -129,7 +132,7 @@ input:focus-visible, select:focus-visible { outline-offset: 1px; }
 .site-header {
   background: var(--ink);
   color: var(--ink-text);
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  border-bottom: 4px solid var(--accent);
 }
 .site-header-inner {
   max-width: 1400px; margin: 0 auto; padding: 18px 24px;
@@ -332,6 +335,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .btn-primary { background: var(--accent); color: var(--accent-contrast); }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--accent-contrast); }
 .btn-primary:disabled { background: var(--surface-3); color: var(--text-3); border-color: var(--border-strong); cursor: not-allowed; }
+.btn-primary.is-busy:disabled { background: var(--accent); color: var(--accent-contrast); border-color: transparent; cursor: progress; }
 .btn-secondary { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-border); }
 .btn-secondary:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
 .btn-ghost { background: transparent; color: var(--text-2); border-color: var(--border-strong); }
@@ -370,6 +374,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .example-loaded svg { width: 44px; height: 44px; color: var(--success); }
 .example-loaded .results-heading { font-size: 1.05rem; margin-bottom: 6px; }
 
+/* "Calculating…" state between Run calculation and the results. */
+.spinner {
+  display: inline-block; width: 18px; height: 18px; flex-shrink: 0;
+  border: 2.5px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+.spinner-lg { width: 44px; height: 44px; border-width: 4px; color: var(--accent); margin: 0 auto 14px; display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.calculating .results-heading { font-size: 1.05rem; margin-bottom: 6px; }
+.calc-progress {
+  height: 6px; max-width: 280px; margin: 0 auto; overflow: hidden;
+  background: var(--surface-3); border-radius: 999px;
+}
+.calc-progress > span {
+  display: block; height: 100%; width: 100%; background: var(--accent); border-radius: inherit;
+  transform-origin: left; animation: calc-fill 5s linear both;   /* duration set from CALC_DELAY_MS in app.js */
+}
+@keyframes calc-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .calc-progress { display: none; } }
+
 /* Brief highlight when "Go to Run calculation" brings the run bar into view. */
 .run-bar.attention { animation: run-attention 1.6s ease-out; }
 @keyframes run-attention {
@@ -387,9 +411,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .alert-error { background: var(--danger-soft);  color: var(--danger);  border-color: var(--danger-border); }
 .alert .alert-kind { font-weight: 700; }
 .alerts-group { margin-bottom: 18px; }
-.alerts-group > summary {
-  cursor: pointer; font-size: 0.9rem; font-weight: 600; color: var(--text-2); padding: 6px 0; margin-bottom: 6px;
-}
 
 /* Summary tiles */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 18px; }
@@ -472,17 +493,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .fa-badge.warn { background: var(--warning-soft); color: var(--warning); border-color: var(--warning-border); }
 .fa-badge.fail { background: var(--danger-soft);  color: var(--danger);  border-color: var(--danger-border); }
 
-/* Audit trail */
-.audit { margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.audit > summary {
+/* Collapsible sections (notes and assumptions, audit trail) */
+.disclosure { border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.disclosure > summary {
   cursor: pointer; list-style: none; padding: 12px 16px;
   font-size: 0.9rem; font-weight: 700; color: var(--text-2);
   display: flex; align-items: center; gap: 8px;
 }
-.audit > summary::-webkit-details-marker { display: none; }
-.audit > summary::before { content: '▸'; color: var(--text-3); transition: transform .15s; }
-.audit[open] > summary::before { transform: rotate(90deg); }
-.audit > .table-wrap { padding: 0 16px 12px; }
+.disclosure > summary:hover { color: var(--accent); }
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before { content: '▸'; color: var(--text-3); transition: transform .15s; }
+.disclosure[open] > summary::before { transform: rotate(90deg); }
+.disclosure-body { padding: 0 16px 6px; }
+.audit { margin-top: 8px; }
 
 /* ── Footer ──────────────────────────────────────────────── */
 .site-footer { border-top: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: 0.85rem; }
@@ -530,8 +553,9 @@ mark.todo { background: var(--warning-soft); color: var(--warning); border: 1px 
   .results-col .panel-body { overflow: visible; padding: 0; }
   .panel-header { padding: 0 0 8px; }
   .print-only { display: block; }
-  .audit { border: 0; }
-  .audit > summary::before { content: ''; }
+  .disclosure { border: 0; }
+  .disclosure > summary::before { content: ''; }
+  .disclosure-body { padding: 0; }
   .result-section, .compliance-summary, .stat-grid, .device-breakdown { break-inside: avoid; }
   a { color: #000; }
 }
