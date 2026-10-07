@@ -19,6 +19,7 @@
     toM2:                  scaleUS(C.FT2_TO_M2),        // ft² → m²
     toKpa:                 scaleUS(C.PSI_TO_KPA),       // psi → kPa
     toJkg:                 scaleUS(C.BTU_LB_TO_J_KG),   // BTU/lb → J/kg
+    toJkgK:                scaleUS(C.BTU_LB_F_TO_J_KG_K), // BTU/(lb·°F) → J/(kg·K)
     toNm3hr:               scaleUS(C.SCF_TO_NM3),       // SCFH → Nm³/h
     insulConductivityToSI: scaleUS(C.BTU_IN_HR_FT2_F_TO_W_M_K),
     insulHTCToSI:          scaleUS(C.BTU_HR_FT2_F_TO_W_M2_K),

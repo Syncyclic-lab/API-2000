@@ -14,6 +14,7 @@ https://syncyclic-lab.github.io/API-2000/
 | Environmental factor | Table 9 (bare, insulated from conductance, impoundment, earth-covered, underground, custom). |
 | Emergency venting | Selectable basis: **Eq. 14** `q = 906.6·Q·F/L·√(T/M)` with the stored fluid's latent heat, molecular weight and relieving temperature (default), or the **hexane basis** of Tables 5/7 and Eq. 16 for hexane-like fluids (warns if the entered fluid differs from hexane by more than 10 %). The normal-venting method selection does not affect this. |
 | Other circumstances (§3.2.5) | API 2000 gives no methods (§3.2.5.1), so these are engineering estimates: control-valve failure (excess liquid flow × Table A.1 / Eq. 1–5 factors), blanket-gas and pressure-transfer gas inflow and heat-exchanger tube rupture (Annex D nozzle flow), abnormal heat / exothermic reaction / mixing (vapour = Q/L or flashed mass), hot tank in rain (Annex A Eq. A.3), barometric change (V·dp/dt / p); all as air-equivalent flow (Eq. D.37). Each can be coincident with normal venting and routed to normal or emergency devices; the largest contingency on each path governs (§3.3.1, §3.6.1). Liquid overfill adds no load (§3.2.5.10). |
+| Two-phase venting (optional) | API 2000 gives no method, so this is an engineering estimate for scenarios that generate vapor or gas within the liquid (fire, abnormal heat, exothermic reaction, mixing, heat-exchanger rupture, vapor breakthrough). **Onset:** DIERS drift-flux level swell with uniform vapor generation. Churn-turbulent (C0 = 1.5, U∞ = 1.53·(σgΔρ/ρl²)^¼) or bubbly (C0 = 1.2, coefficient 1.18); two-phase venting starts when the swollen liquid fills the tank. Foamy liquids are always two-phase. **Required flow:** homogeneous-vessel venting W = (volumetric vapor/gas generation) / v̄ (Leung). **Capacity:** omega method (Leung; API Std 520 Part I) at the tank allowable pressure. Calculated vents use Cd·A; air-rated devices are credited with the Cd·A implied by their air rating. |
 | Installed devices | Rated capacity at MAWP / MAWV with linear partial lift; open vents from isentropic nozzle flow of air (Annex D). An optional flame arrestor (K-factor ΔP, ISO 16852) sits in both relief paths: each path is solved for the self-consistent flow `Q = capacity(allowable − ΔP(Q))`, with the ΔP evaluated for air at that direction's capacity temperature and upstream pressure. A manufacturer-rated open vent is taken as rated at the tank allowable and scaled as `Q ∝ √p`. |
 
 US units are converted to SI at the input boundary; flows convert at
@@ -25,6 +26,7 @@ US units are converted to SI at the input boundary; flows convert at
 - `unitConverter.js` — US ↔ SI conversion
 - `api2000Engine.js` — calculation functions (SI)
 - `flameArrestor.js` — flame-arrestor ΔP module
+- `twoPhase.js` — two-phase venting check (DIERS level swell, homogeneous vessel, omega method)
 - `index.js` — validation, orchestration and warnings (`window.API2000.runCalculation`)
 - `app.js`, `index.html` — user interface
 - `styles.css` — shared styles for every page (light/dark themes, print layout, system fonts)

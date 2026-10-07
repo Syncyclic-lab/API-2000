@@ -14,14 +14,14 @@ const UNITS = {
     fill: 'm³/h', heat: 'J/kg',
     insulThick: 'mm', insulK: 'W/(m·K)', insulH: 'W/(m²·K)',
     area: 'm²', flow: 'Nm³/h', pipeDiam: 'mm',
-    heatRate: 'kW', massFlow: 'kg/h', density: 'kg/m³', pressRate: 'kPa/h',
+    heatRate: 'kW', massFlow: 'kg/h', density: 'kg/m³', pressRate: 'kPa/h', cp: 'J/(kg·K)',
   },
   US: {
     vol: 'BBL', dim: 'ft', press: 'psi(g)', temp: '°F',
     fill: 'BBL/h', heat: 'BTU/lb',
     insulThick: 'in', insulK: 'BTU·in/(h·ft²·°F)', insulH: 'BTU/(h·ft²·°F)',
     area: 'ft²', flow: 'SCFH', pipeDiam: 'in',
-    heatRate: 'BTU/h', massFlow: 'lb/h', density: 'lb/ft³', pressRate: 'psi/h',
+    heatRate: 'BTU/h', massFlow: 'lb/h', density: 'lb/ft³', pressRate: 'psi/h', cp: 'BTU/(lb·°F)',
   },
 };
 
@@ -30,6 +30,7 @@ const UNIT_CLASS_MAP = {
   'mass-flow-unit':   'massFlow',
   'density-unit':     'density',
   'press-rate-unit':  'pressRate',
+  'cp-unit':          'cp',
   'vol-unit':         'vol',
   'dim-unit':         'dim',
   'press-unit':       'press',
@@ -577,6 +578,9 @@ vaporPressure.addEventListener('change', updateVolatilityIndicator);
 flashPointInput.addEventListener('input', updateVolatilityIndicator);
 insulationType.addEventListener('change', updateInsulationFields);
 $('envFactor').addEventListener('change', (e) => show($('customEnvFactorField'), e.target.value === 'CUSTOM'));
+// Two-phase check: inputs appear when enabled; the homogeneous regime needs no surface tension.
+$('tpEnabled').addEventListener('change', (e) => show($('tpFields'), e.target.checked));
+$('tpRegime').addEventListener('change', (e) => show($('tpSigmaField'), e.target.value !== 'HOMOGENEOUS'));
 $('fireBasis').addEventListener('change', (e) => {
   $('fireBasisHint').textContent = e.target.value === 'HEXANE'
     ? 'Hexane properties (L = 334,900 J/kg, M = 86.17). Only for fluids similar to hexane.'
@@ -656,6 +660,15 @@ function assemblePayload() {
       manual_wetted_area:   num('manualWettedArea'),
     },
     devices: collectDeviceData(),
+    two_phase: {
+      enabled:         bool('tpEnabled'),
+      regime:          $('tpRegime').value,
+      fill_percent:    num('tpFill'),
+      liquid_density:  num('tpDensity'),
+      liquid_cp:       num('tpCp'),
+      surface_tension: num('tpSigma'),
+      scenarios:       [...document.querySelectorAll('.tp-scenario:checked')].map(cb => cb.value),
+    },
   };
 }
 
@@ -754,23 +767,25 @@ function complianceRows(o) {
   return rows;
 }
 
-function renderCompliance(o) {
-  const fu = o.flow_unit;
-  const rows = complianceRows(o);
-  const allPass = rows.every(r => r.pass);
+// Two-phase cases that start two-phase venting, checked against the devices (mass flow).
+function twoPhaseRows(o) {
+  if (!o.two_phase) return [];
+  return o.two_phase.items.filter(t => t.two_phase && t.adequate != null)
+    .map(t => ({ label: t.label, required: t.required, actual: t.capacity, pass: t.adequate }));
+}
+
+const allRequirementsMet = (o) =>
+  complianceRows(o).every(r => r.pass) && twoPhaseRows(o).every(r => r.pass);
+
+function complianceTable(rows, unit, firstHeader) {
   return `
-    <div class="compliance-summary">
-      <h3 class="compliance-header ${allPass ? 'all-pass' : 'has-fail'}">
-        ${allPass ? ICONS.pass : ICONS.fail}
-        ${allPass ? 'All venting requirements met' : 'Venting deficiency — review required'}
-      </h3>
       <div class="table-wrap">
         <table class="compliance-table">
           <thead>
             <tr>
-              <th scope="col">Requirement</th>
-              <th scope="col">Required <span class="unit">${escapeHtml(fu)}</span></th>
-              <th scope="col">Installed <span class="unit">${escapeHtml(fu)}</span></th>
+              <th scope="col">${escapeHtml(firstHeader)}</th>
+              <th scope="col">Required <span class="unit">${escapeHtml(unit)}</span></th>
+              <th scope="col">Installed <span class="unit">${escapeHtml(unit)}</span></th>
               <th scope="col" class="col-status">Status</th>
             </tr>
           </thead>
@@ -787,7 +802,53 @@ function renderCompliance(o) {
             }).join('')}
           </tbody>
         </table>
+      </div>`;
+}
+
+function renderCompliance(o) {
+  const allPass = allRequirementsMet(o);
+  const tpRows = twoPhaseRows(o);
+  return `
+    <div class="compliance-summary">
+      <h3 class="compliance-header ${allPass ? 'all-pass' : 'has-fail'}">
+        ${allPass ? ICONS.pass : ICONS.fail}
+        ${allPass ? 'All venting requirements met' : 'Venting deficiency — review required'}
+      </h3>
+      ${complianceTable(complianceRows(o), o.flow_unit, 'Requirement')}
+      ${tpRows.length > 0 ? complianceTable(tpRows, o.mass_unit, 'Two-phase venting') : ''}
+    </div>`;
+}
+
+function renderTwoPhase(o) {
+  const tp = o.two_phase;
+  const mu = o.mass_unit;
+  const au = o.area_unit;
+  const result = (t) => {
+    if (!t.two_phase) return '<span class="status-chip pass">Vapor only</span>';
+    if (t.adequate == null) return '<span class="status-chip fail">Two-phase</span>';
+    return `<span class="status-chip ${t.adequate ? 'pass' : 'fail'}">${t.adequate ? 'Pass' : 'Fail'}</span>`;
+  };
+  return `
+    <div class="device-breakdown">
+      <h3>Two-phase venting check (DIERS) — engineering estimate</h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr><th scope="col">Scenario</th><th scope="col">Liquid swell</th><th scope="col">Required</th><th scope="col">Installed</th><th scope="col">Result</th></tr>
+          </thead>
+          <tbody>
+            ${tp.items.map(t => `<tr>
+              <td>${escapeHtml(t.label)}<br><small>${t.path === 'EMERGENCY' ? 'Emergency path' : 'Normal path'}</small></td>
+              <td class="mono-val">${t.swell_pct == null ? 'Foams to top' : `${fmtVal(t.swell_pct, '%')}<br><small>void ${fmtVal(t.void_pct, '%')}</small>`}</td>
+              <td class="mono-val">${t.two_phase ? `${fmtVal(t.required, mu)}<br><small>Cd·A ${fmtVal(t.required_area, au)}</small>` : '—'}</td>
+              <td class="mono-val">${t.two_phase && t.capacity != null ? `${fmtVal(t.capacity, mu)}<br><small>Cd·A ${fmtVal(t.installed_area, au)}</small>` : '—'}</td>
+              <td>${result(t)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
       </div>
+      <p class="table-note">Liquid behaviour: ${escapeHtml(tp.regime_label)}. Liquid swell is the swollen liquid volume as a
+        share of the tank; two-phase venting starts at 100 %. Flows are vapor–liquid mixture at the tank's allowable pressure.</p>
     </div>`;
 }
 
@@ -963,6 +1024,7 @@ function renderResults(result) {
   }
 
   if (o.scenarios.length > 0) html += renderScenarioResults(o);
+  if (o.two_phase && o.two_phase.items.length > 0) html += renderTwoPhase(o);
   if (o.actual_venting && o.actual_venting.devices.length > 0) html += renderDevices(o);
 
   if (result.intermediates) {
@@ -981,7 +1043,7 @@ function renderResults(result) {
   $('btnPrint').hidden = false;
 
   const verdict = o.actual_venting
-    ? (complianceRows(o).every(r => r.pass) ? 'All venting requirements met.' : 'Venting deficiency found.')
+    ? (allRequirementsMet(o) ? 'All venting requirements met.' : 'Venting deficiency found.')
     : '';
   return {
     status: `Calculation complete. ${verdict} Governing outbreathing ${fmtVal(o.governing.outbreathing, fu)}, ` +
@@ -1048,6 +1110,13 @@ function loadExample() {
   setField($('opt_fireCaseEnabled'), true);
   loadExampleScenarios();
 
+  // Two-phase check on every eligible scenario: a non-foamy hydrocarbon, 80 % full.
+  setField($('tpEnabled'), true);
+  for (const [id, v] of Object.entries({ tpRegime: 'CHURN', tpFill: 80, tpDensity: 650, tpCp: 2200, tpSigma: 20 })) {
+    setField($(id), v);
+  }
+  document.querySelectorAll('.tp-scenario').forEach(cb => setField(cb, true));
+
   // A gooseneck behind a flame arrestor, plus an emergency relief valve for the fire case.
   deviceRoster.innerHTML = '';
   renderDeviceRow();
@@ -1078,7 +1147,8 @@ function loadExample() {
       ${ICONS.pass}
       <h3 class="results-heading" id="resultsHeading" tabindex="-1">Example tank loaded</h3>
       <p>A 785 m³ vertical tank (MAWP 3.5 kPa, MAWV 0.5 kPa) with a gooseneck vent behind a flame arrestor and an
-        emergency relief valve is now filled in, together with all ten §3.2.5 other circumstances (step 5).
+        emergency relief valve is now filled in, together with all ten §3.2.5 other circumstances (step 5) and a
+        two-phase venting check (step 7).
         Review or edit the inputs, then tick the acknowledgement and run the calculation.</p>
       <button type="button" class="btn btn-primary" id="btnGoRun">Go to Run calculation</button>
     </div>`;

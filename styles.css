@@ -254,6 +254,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .check-item input { margin-top: 2px; }
 .check-item span { font-size: 0.93rem; color: var(--text); }
 
+.tp-scenarios { border: 0; margin-top: 16px; }
+.tp-scenarios legend { font-size: 0.88rem; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
+.hint-inline { font-weight: 400; color: var(--text-3); font-size: 0.8rem; }
+
 .subpanel {
   margin-top: 16px; padding: 16px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
