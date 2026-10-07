@@ -587,7 +587,7 @@ $('fireBasis').addEventListener('change', (e) => {
     : 'Uses the latent heat, molecular weight and relieving vapor temperature from step 3.';
 });
 disclaimerCheck.addEventListener('change', () => {
-  calcBtn.disabled = !disclaimerCheck.checked;
+  updateRunButton();
   $('runHint').hidden = disclaimerCheck.checked;
 });
 
@@ -706,16 +706,16 @@ function renderAlerts(warnings, errors) {
       : alertBox('alert-warn', ICONS.notice, 'Note', w.message))).join('');
 }
 
-// Errors and warnings stay visible; notes are grouped in a collapsible list.
+// Errors and warnings stay visible; notes are grouped in a list that starts collapsed.
 function renderNotices(warnings, errors) {
   const notes = (warnings || []).filter(w => w.severity !== 'WARNING');
   const urgent = (warnings || []).filter(w => w.severity === 'WARNING');
   let html = renderAlerts(urgent, errors);
   if (notes.length > 0) {
     html += `
-      <details class="alerts-group" open>
+      <details class="disclosure alerts-group">
         <summary>Notes and assumptions (${notes.length})</summary>
-        ${renderAlerts(notes, [])}
+        <div class="disclosure-body">${renderAlerts(notes, [])}</div>
       </details>`;
   }
   return html;
@@ -1029,9 +1029,9 @@ function renderResults(result) {
 
   if (result.intermediates) {
     html += `
-      <details class="audit">
+      <details class="disclosure audit">
         <summary>Intermediates (SI audit trail)</summary>
-        <div class="table-wrap">
+        <div class="table-wrap disclosure-body">
           <table class="result-table">
             ${result.intermediates.map(([label, value, unit]) => tableRow(label, fmtVal(value, unit))).join('')}
           </table>
@@ -1168,11 +1168,50 @@ function goToRun() {
 
 // --- Form submission and actions --------------------------------------------
 
+// Run calculation shows a "Calculating…" state for this long before the results appear.
+const CALC_DELAY_MS = 5000;
+let calculating = false;
+
+function updateRunButton() {
+  calcBtn.disabled = calculating || !disclaimerCheck.checked;
+}
+
+function setCalculating(on) {
+  calculating = on;
+  calcBtn.classList.toggle('is-busy', on);
+  calcBtn.innerHTML = on ? '<span class="spinner" aria-hidden="true"></span>Calculating…' : 'Run calculation';
+  updateRunButton();
+}
+
+function showCalculating() {
+  resultsContainer.innerHTML = `
+    <div class="results-placeholder calculating">
+      <span class="spinner spinner-lg" aria-hidden="true"></span>
+      <h3 class="results-heading" id="resultsHeading" tabindex="-1">Calculating…</h3>
+      <p>Working through the venting cases. Results appear in about ${CALC_DELAY_MS / 1000} seconds.</p>
+      <div class="calc-progress" aria-hidden="true"><span></span></div>
+    </div>`;
+  resultsContainer.querySelector('.calc-progress > span').style.animationDuration = `${CALC_DELAY_MS}ms`;
+  $('btnPrint').hidden = true;
+}
+
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  const { status } = renderResults(window.API2000.runCalculation(assemblePayload()));
-  announce(status);
+  if (calculating) return;
+  const payload = assemblePayload();   // the inputs as they were when Run was pressed
+  setCalculating(true);
+  showCalculating();
+  announce('Calculating…');
   $('resultsHeading').focus();
+  setTimeout(() => {
+    try {
+      const { status } = renderResults(window.API2000.runCalculation(payload));
+      announce(status);
+      $('resultsHeading').focus();
+    } finally {
+      setCalculating(false);
+    }
+  }, CALC_DELAY_MS);
 });
 
 resultsContainer.addEventListener('click', (e) => {

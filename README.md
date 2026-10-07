@@ -29,7 +29,7 @@ US units are converted to SI at the input boundary; flows convert at
 - `twoPhase.js` — two-phase venting check (DIERS level swell, homogeneous vessel, omega method)
 - `index.js` — validation, orchestration and warnings (`window.API2000.runCalculation`)
 - `app.js`, `index.html` — user interface
-- `styles.css` — shared styles for every page (light/dark themes, print layout, system fonts)
+- `styles.css` — shared styles for every page (Ecolab brand colours, light/dark themes, print layout, installed fonts only)
 - `legal.html`, `privacy.html`, `terms.html`, `accessibility.html` — legal notice, privacy notice, terms of use
   and accessibility statement
 
