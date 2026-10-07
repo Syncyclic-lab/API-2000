@@ -138,6 +138,19 @@ window.API2000.SCENARIOS = {
   RAIN_WALL_TEMP_C: 15.6,     // rain-cooled wall temperature (Annex A.3.3.3)
 };
 
+// --- TWO-PHASE VENTING (DIERS / omega method) ----------------------------------
+// API 2000 has no two-phase method; see twoPhase.js for the references.
+
+window.API2000.TWO_PHASE = {
+  G: 9.80665,                            // m/s²
+  // Drift-flux distribution parameter C0 and bubble-rise coefficient
+  // (U∞ = coeff · (σ·g·Δρ / ρl²)^¼) for each vessel flow regime.
+  CHURN:  { C0: 1.5, U_COEFF: 1.53 },   // non-foamy, low viscosity
+  BUBBLY: { C0: 1.2, U_COEFF: 1.18 },   // viscous, non-foamy
+  // Device air ratings are taken at 15.6 °C (60 °F).
+  AIR_RATING_TEMP_K: 288.75,
+};
+
 // Scope limit of API Std 2000 (§1): 103.4 kPa(g) / 15 psig.
 window.API2000.MAX_SCOPE_PRESSURE_KPA = 103.4;
 
@@ -179,6 +192,7 @@ window.API2000.CONVERSIONS = {
   KW_TO_W:        1000,
   LB_FT3_TO_KG_M3: 16.01846,
   BTU_LB_TO_J_KG: 2326.0,
+  BTU_LB_F_TO_J_KG_K: 4186.8,
   KG_TO_LB:       2.204623,
   // BTU·in/(hr·ft²·°F) to W/(m·K)
   BTU_IN_HR_FT2_F_TO_W_M_K: 0.1442279,

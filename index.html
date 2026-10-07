@@ -7,8 +7,8 @@
   <meta name="referrer" content="no-referrer">
   <meta name="description" content="Free in-browser calculator for normal and emergency venting of atmospheric and low-pressure storage tanks per API Std 2000, 7th Edition. No data leaves your device.">
   <title>API 2000 Venting Calculator</title>
-  <link rel="icon" href="favicon.svg?v=20261007.2" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=20261007.2">
+  <link rel="icon" href="favicon.svg?v=20261007.3" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css?v=20261007.3">
 </head>
 <body>
   <a class="skip-link" href="#calculator">Skip to calculator</a>
@@ -16,7 +16,7 @@
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand" href="./">
-        <img class="brand-mark" src="favicon.svg?v=20261007.2" width="40" height="40" alt="">
+        <img class="brand-mark" src="favicon.svg?v=20261007.3" width="40" height="40" alt="">
         <span>
           <span class="brand-title">API 2000 Venting Calculator</span><br>
           <span class="brand-subtitle">Atmospheric &amp; low-pressure storage tanks · 7th Edition (March 2014)</span>
@@ -314,6 +314,63 @@
               </div>
             </section>
 
+            <!-- 7. Two-phase -->
+            <section class="form-section" aria-labelledby="sec-twophase">
+              <div class="section-head">
+                <span class="step-num" aria-hidden="true">7</span>
+                <div>
+                  <h3 class="section-title" id="sec-twophase">Two-phase venting check <span class="ref">DIERS</span></h3>
+                  <p class="section-note">For liquids that may swell or foam up to the vent when vapor or gas forms inside
+                    them: runaway reactions, boiling foamy liquids, gas bubbling through the liquid. Estimates whether
+                    two-phase venting starts and, if it does, the vapor–liquid flow and vent area needed.</p>
+                </div>
+              </div>
+              <label class="check-item"><input type="checkbox" id="tpEnabled" aria-controls="tpFields"><span>Check for two-phase (vapor–liquid) venting</span></label>
+              <div class="subpanel" id="tpFields" hidden>
+                <div class="field-grid">
+                  <div class="field full-width">
+                    <label for="tpRegime">Liquid behaviour</label>
+                    <select id="tpRegime" aria-describedby="tpRegimeHint">
+                      <option value="CHURN" selected>Non-foamy, low viscosity (&lt; 100 cP) — churn-turbulent</option>
+                      <option value="BUBBLY">Viscous, non-foamy — bubbly</option>
+                      <option value="HOMOGENEOUS">Foamy or high viscosity — always two-phase (homogeneous)</option>
+                    </select>
+                    <p class="hint" id="tpRegimeHint">DIERS vessel flow regime. Choose foamy if the liquid foams or its behaviour is unknown.</p>
+                  </div>
+                  <div class="field">
+                    <label for="tpFill">Liquid level at start of venting <span class="unit">% of volume</span></label>
+                    <input type="number" id="tpFill" step="any" min="0" max="100" inputmode="decimal" aria-describedby="tpFillHint">
+                    <p class="hint" id="tpFillHint">Use the highest normal fill level</p>
+                  </div>
+                  <div class="field">
+                    <label for="tpDensity">Liquid density <span class="unit density-unit">kg/m³</span></label>
+                    <input type="number" id="tpDensity" step="any" min="0" inputmode="decimal" aria-describedby="tpDensityHint">
+                    <p class="hint" id="tpDensityHint">At the relieving temperature</p>
+                  </div>
+                  <div class="field">
+                    <label for="tpCp">Liquid heat capacity <span class="unit cp-unit">J/(kg·K)</span></label>
+                    <input type="number" id="tpCp" step="any" min="0" inputmode="decimal">
+                  </div>
+                  <div class="field" id="tpSigmaField">
+                    <label for="tpSigma">Surface tension <span class="unit">mN/m</span></label>
+                    <input type="number" id="tpSigma" step="any" min="0" inputmode="decimal" value="20" aria-describedby="tpSigmaHint">
+                    <p class="hint" id="tpSigmaHint">≈ 20 for light hydrocarbons, 72 for water (= dyn/cm)</p>
+                  </div>
+                </div>
+                <fieldset class="tp-scenarios">
+                  <legend>Scenarios to check <span class="hint-inline">(each must also be enabled above)</span></legend>
+                  <div class="check-list">
+                    <label class="check-item"><input type="checkbox" class="tp-scenario" value="fire" checked><span>Fire exposure (step 6)</span></label>
+                    <label class="check-item"><input type="checkbox" class="tp-scenario" value="exothermic_reaction" checked><span>Exothermic reaction</span></label>
+                    <label class="check-item"><input type="checkbox" class="tp-scenario" value="abnormal_heat_transfer"><span>Abnormal heat transfer</span></label>
+                    <label class="check-item"><input type="checkbox" class="tp-scenario" value="mixing_of_products"><span>Mixing of products</span></label>
+                    <label class="check-item"><input type="checkbox" class="tp-scenario" value="internal_heat_exchanger_failure"><span>Internal heat exchanger failure (medium released below the liquid surface)</span></label>
+                    <label class="check-item"><input type="checkbox" class="tp-scenario" value="pressure_transfer_vapor_breakthrough"><span>Pressure transfer / vapor breakthrough (gas entering below the liquid surface)</span></label>
+                  </div>
+                </fieldset>
+              </div>
+            </section>
+
           </div><!-- /tab-required -->
 
           <div id="tab-actual" class="tab-content" role="tabpanel" aria-labelledby="tabbtn-actual" hidden>
@@ -395,11 +452,12 @@
     </div>
   </footer>
 
-  <script defer src="constants.js?v=20261007.2"></script>
-  <script defer src="unitConverter.js?v=20261007.2"></script>
-  <script defer src="api2000Engine.js?v=20261007.2"></script>
-  <script defer src="flameArrestor.js?v=20261007.2"></script>
-  <script defer src="index.js?v=20261007.2"></script>
-  <script defer src="app.js?v=20261007.2"></script>
+  <script defer src="constants.js?v=20261007.3"></script>
+  <script defer src="unitConverter.js?v=20261007.3"></script>
+  <script defer src="api2000Engine.js?v=20261007.3"></script>
+  <script defer src="flameArrestor.js?v=20261007.3"></script>
+  <script defer src="twoPhase.js?v=20261007.3"></script>
+  <script defer src="index.js?v=20261007.3"></script>
+  <script defer src="app.js?v=20261007.3"></script>
 </body>
 </html>

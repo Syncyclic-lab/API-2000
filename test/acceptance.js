@@ -12,7 +12,7 @@
   if (isNode) {
     const path = require('path');
     global.window = {};
-    for (const f of ['constants.js', 'unitConverter.js', 'api2000Engine.js', 'flameArrestor.js', 'index.js']) {
+    for (const f of ['constants.js', 'unitConverter.js', 'api2000Engine.js', 'flameArrestor.js', 'twoPhase.js', 'index.js']) {
       require(path.join(__dirname, '..', f));
     }
   }
@@ -236,6 +236,61 @@
   near('Breakthrough Cd', vbLabel('Discharge coefficient Cd'), 0.62, 0);
   near('Breakthrough gas temperature used (°C)', vbLabel('Gas temperature (nozzle flow)'), 15.6, 1e-9);
   near('Breakthrough vent temperature used (K)', vbLabel('Vent temperature (air equivalent)'), 310.65, 1e-9);
+
+  // --- Two-phase venting (DIERS drift flux, homogeneous vessel, omega method) --
+
+  group = 'Two-phase venting';
+  near('η_c(ω = 1) = e^−½ (isothermal ideal gas)', engine.omegaCriticalRatio(1), Math.exp(-0.5), 1e-12);
+  const api520Fit = (w) => Math.pow(1 + (1.0446 - 0.0093431 * Math.sqrt(w)) * Math.pow(w, -0.56261), -0.70356 + 0.014685 * Math.log(w));
+  for (const w of [0.5, 2, 10, 100]) within(`η_c(ω = ${w}) matches the API 520 explicit fit`, engine.omegaCriticalRatio(w), api520Fit(w), 0.001);
+  {
+    const ec = engine.omegaCriticalRatio(5);
+    within('Mass flux continuous at η_c (ω = 5)', engine.omegaMassFlux(5, 1e5, 1e5 * (ec + 1e-8), 0.01).G,
+      engine.omegaMassFlux(5, 1e5, 1e5 * (ec - 1e-8), 0.01).G, 1e-6);
+  }
+  near('Churn-turbulent α = ψ / (2 + 1.5ψ) at ψ = 0.248', engine.averageVoidFraction('CHURN', 0.248), 0.248 / (2 + 1.5 * 0.248), 1e-12);
+  {
+    const a = engine.averageVoidFraction('BUBBLY', 0.3);
+    near('Bubbly α satisfies ψ = α(1−α)² / ((1−α³)(1−1.2α))', a * (1 - a) ** 2 / ((1 - a ** 3) * (1 - 1.2 * a)), 0.3, 1e-9);
+  }
+  near('Horizontal cylinder half full: surface = D × L', engine.liquidSurfaceArea('HORIZONTAL_CYLINDER', 4, 10, 0.5), 40, 1e-6);
+  near('Sphere half full: surface = πR²', engine.liquidSurfaceArea('SPHERE', 10, null, 0.5), Math.PI * 25, 1e-6);
+  {
+    const rated = nozzle(P_ATM + 3.5, P_ATM, 288.75);
+    within('Cd·A backed out of an air rating = true Cd·A', engine.effectiveAreaFromAirRating(rated, 3.5), CD * Math.PI * PIPE_ID ** 2 / 4, 1e-9);
+  }
+  {
+    const Q = 300e3, L = 357000, M = 72.15, rhoL = 650, T0 = 310.65, P0 = 104.825;
+    const r = engine.evaluateTwoPhase({ sources: [{ kind: 'vapor', kgS: Q / L, M }], regime: 'HOMOGENEOUS', fillFraction: 0.8,
+      rhoL, Cp: 2200, sigma: 0.02, latent: L, fluidM: M, T0_K: T0, P0_kPa: P0, Pa_kPa: P_ATM,
+      tank: { volume_m3: 785, shape: 'VERTICAL_CYLINDER', diameter_m: 10, length_m: 10 }, ventArea: null });
+    const vfg = 8314.46 * T0 / (P0 * 1000 * M) - 1 / rhoL;
+    within('Homogeneous vessel W = Q·v_fg / (v·h_fg) (Leung)', r.required_kgS, Q * vfg / (r.vAvg * L), 1e-12);
+  }
+
+  const tpPayload = (regime, fill) => payload(p => {
+    Object.assign(p.environment, { insulation_type: 'UNINSULATED' });
+    p.fire.environmental_factor = 'BARE';
+    p.scenarios = { exothermic_reaction: { enabled: true, relieved_by: 'NORMAL', heat_input: 300, gas_generation: 250, gas_mw: 44.01 } };
+    p.two_phase = { enabled: true, regime, fill_percent: fill, liquid_density: 650, liquid_cp: 2200, surface_tension: 20,
+      scenarios: ['fire', 'exothermic_reaction'] };
+    p.devices = [gooseneck(null), { type: 'EPRV', direction: 'OUTBREATHING', set_pressure: 2.5, rated_flow_outbreathing: 25000, rated_overpressure_pct: 10 }];
+  });
+  const churn80 = runCalculation(tpPayload('CHURN', 80));
+  equal('Churn-turbulent, 80 % full: no errors', churn80.errors.length, 0);
+  ok('Churn-turbulent, 80 % full: vapor-only venting for fire and exothermic',
+    churn80.outputs.two_phase.items.every(t => t.two_phase === false), churn80.outputs.two_phase.items.map(t => t.swell_pct).join(' / '));
+  near('Churn-turbulent, 80 % full: fire swell (% of tank)', churn80.outputs.two_phase.items[0].swell_pct, 89.4, 0.05);
+  const churn92 = runCalculation(tpPayload('CHURN', 92));
+  ok('Churn-turbulent, 92 % full: fire becomes two-phase', churn92.outputs.two_phase.items[0].two_phase === true);
+  equal('Churn-turbulent, 92 % full: two-phase deficiency flagged', churn92.outputs.actual_venting.adequacy.two_phase, false);
+  const foamy = runCalculation(tpPayload('HOMOGENEOUS', 80));
+  const foamyExo = foamy.outputs.two_phase.items.find(t => t.label === 'Exothermic reaction');
+  ok('Foamy: exothermic reaction vents two-phase', foamyExo.two_phase === true);
+  within('Foamy: exothermic required Cd·A (m²)', foamyExo.required_area, 0.1531, 0.002);
+  ok('Two-phase check off: no two-phase output', runCalculation(payload()).outputs.two_phase === null);
+  ok('Two-phase check validates its inputs', runCalculation(payload(p => { p.two_phase = { enabled: true, scenarios: [] }; }))
+    .errors.some(e => e.startsWith('Two-phase check')));
 
   // --- Report -------------------------------------------------------------------
 
